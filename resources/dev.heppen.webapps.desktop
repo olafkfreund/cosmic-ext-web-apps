@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=Quick Web Apps
+Name[cs]=Rychlé webové aplikace
 Exec=dev.heppen.webapps
 Type=Application
 StartupNotify=true
@@ -7,3 +8,4 @@ Icon=dev.heppen.webapps
 StartupWMClass=dev.heppen.webapps
 Categories=X-COSMIC;Utility;
 Keywords=App;Software;Manager;
+Keywords[cs]=Aplikace;Software;Manažer;Web;
