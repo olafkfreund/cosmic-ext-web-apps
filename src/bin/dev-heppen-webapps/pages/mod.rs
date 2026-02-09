@@ -79,7 +79,6 @@ pub enum Message {
     ExportAppsResult(Result<(), String>),
     ImportApps,
     ImportAppsFilePicked(Vec<String>),
-    ImportAppsResult(Result<usize, String>),
     SearchApps(String),
     ToggleContextPage(ContextPage),
     UpdateConfig(AppConfig),
@@ -403,9 +402,7 @@ impl Application for QuickWebApps {
                         Ok(r) => r.response(),
                         Err(e) => {
                             tracing::error!("Failed to open import dialog: {e}");
-                            return cosmic::action::app(Message::ImportAppsResult(
-                                Err(fl!("toast-import-error")),
-                            ));
+                            return cosmic::action::none();
                         }
                     };
 
@@ -424,27 +421,59 @@ impl Application for QuickWebApps {
             }
             Message::ImportAppsFilePicked(files) => {
                 if let Some(file) = files.first() {
-                    let decoded = urlencoding::decode(file).unwrap_or_default().to_string();
+                    let decoded = match urlencoding::decode(file) {
+                        Ok(d) => d.to_string(),
+                        Err(e) => {
+                            tracing::error!("Failed to decode import file path: {e}");
+                            tasks.push(self.toasts.push(
+                                widget::toaster::Toast::new(fl!("toast-import-error")),
+                            ));
+                            return Task::batch(tasks);
+                        }
+                    };
                     let path = std::path::PathBuf::from(&decoded);
 
                     match webapps::launcher::import_all(&path) {
                         Ok(apps) => {
-                            let count = apps.len();
+                            let total = apps.len();
+                            let mut saved = 0usize;
                             for app in apps {
                                 if let Some(location) = webapps::database_path(
                                     &format!("{}.ron", app.browser.app_id.as_ref()),
                                 ) {
-                                    let config =
-                                        ron::ser::PrettyConfig::default();
-                                    if let Ok(content) =
-                                        ron::ser::to_string_pretty(&app, config)
-                                    {
-                                        let _ = std::fs::write(location, content);
+                                    let config = ron::ser::PrettyConfig::default();
+                                    match ron::ser::to_string_pretty(&app, config) {
+                                        Ok(content) => {
+                                            if let Err(e) = std::fs::write(&location, content) {
+                                                tracing::error!(
+                                                    "Failed to write imported app '{}': {e}",
+                                                    app.name
+                                                );
+                                            } else {
+                                                saved += 1;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to serialize imported app '{}': {e}",
+                                                app.name
+                                            );
+                                        }
                                     }
                                 }
                             }
+                            let msg = if saved == total {
+                                fl!("toast-import-success")
+                            } else {
+                                format!(
+                                    "{} ({}/{})",
+                                    fl!("toast-import-success"),
+                                    saved,
+                                    total
+                                )
+                            };
                             tasks.push(self.toasts.push(
-                                widget::toaster::Toast::new(fl!("toast-import-success")),
+                                widget::toaster::Toast::new(msg),
                             ));
                             return Task::batch(
                                 tasks
@@ -460,18 +489,6 @@ impl Application for QuickWebApps {
                                 widget::toaster::Toast::new(fl!("toast-import-error")),
                             ));
                         }
-                    }
-                }
-            }
-            Message::ImportAppsResult(result) => {
-                match result {
-                    Ok(_) => {
-                        tasks.push(self.toasts.push(
-                            widget::toaster::Toast::new(fl!("toast-import-success")),
-                        ));
-                    }
-                    Err(msg) => {
-                        tasks.push(self.toasts.push(widget::toaster::Toast::new(msg)));
                     }
                 }
             }

@@ -32,7 +32,11 @@ pub const APP_ICON: &[u8] =
 pub const MOBILE_UA: &str = "Mozilla/5.0 (Android 16; Mobile; rv:68.0) Gecko/68.0 Firefox/142.0";
 
 pub fn url_valid(url: &str) -> bool {
-    Url::parse(url).is_ok()
+    if let Ok(parsed) = Url::parse(url) {
+        matches!(parsed.scheme(), "http" | "https")
+    } else {
+        false
+    }
 }
 
 pub fn is_svg(path: &str) -> bool {
@@ -88,11 +92,50 @@ pub fn profiles_path(app_id: &str) -> Option<PathBuf> {
     None
 }
 
+/// Validate that downloaded bytes look like a real image (PNG, JPEG, GIF, or ICO).
+fn is_valid_image_bytes(data: &[u8]) -> bool {
+    if data.len() < 4 {
+        return false;
+    }
+    // PNG: 89 50 4E 47
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        return true;
+    }
+    // JPEG: FF D8 FF
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return true;
+    }
+    // GIF: GIF8
+    if data.starts_with(b"GIF8") {
+        return true;
+    }
+    // ICO: 00 00 01 00
+    if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        return true;
+    }
+    false
+}
+
+/// Sanitize a domain string for safe use in filenames.
+/// Only allows alphanumeric, dots, and hyphens.
+fn sanitize_domain_for_filename(domain: &str) -> String {
+    domain
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-')
+        .collect()
+}
+
 /// Download a favicon for the given URL and save it to the icons directory.
 /// Returns the path to the saved favicon file on success.
 pub async fn download_favicon(url_str: &str) -> Option<String> {
     let parsed = url::Url::parse(url_str).ok()?;
     let domain = parsed.host_str()?;
+
+    // Validate domain contains only safe characters
+    if !domain.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') {
+        tracing::warn!("Invalid domain characters in favicon URL: {}", domain);
+        return None;
+    }
 
     let favicon_url = format!(
         "https://www.google.com/s2/favicons?domain={domain}&sz=128"
@@ -102,6 +145,7 @@ pub async fn download_favicon(url_str: &str) -> Option<String> {
         .arg("-q")
         .arg("-O")
         .arg("-")
+        .arg("--timeout=10")
         .arg(&favicon_url)
         .output()
         .await
@@ -111,12 +155,20 @@ pub async fn download_favicon(url_str: &str) -> Option<String> {
         return None;
     }
 
-    let icons_dir = icons_location()?;
-    if !icons_dir.exists() {
-        create_dir_all(&icons_dir).ok()?;
+    // Validate the response is actually an image
+    if !is_valid_image_bytes(&response.stdout) {
+        tracing::warn!("Favicon response is not a valid image format");
+        return None;
     }
 
-    let favicon_path = icons_dir.join(format!("favicon-{domain}.png"));
+    let icons_dir = icons_location()?;
+    if let Err(e) = tokio::fs::create_dir_all(&icons_dir).await {
+        tracing::error!("Failed to create icons directory: {e}");
+        return None;
+    }
+
+    let safe_domain = sanitize_domain_for_filename(domain);
+    let favicon_path = icons_dir.join(format!("favicon-{safe_domain}.png"));
     tokio::fs::write(&favicon_path, &response.stdout).await.ok()?;
 
     Some(favicon_path.to_string_lossy().to_string())

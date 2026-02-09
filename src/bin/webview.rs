@@ -95,8 +95,12 @@ fn main() -> wry::Result<()> {
             }
             // Redirect downloads to XDG download directory
             if let Some(download_dir) = dirs::download_dir() {
-                if let Some(filename) = dest_path.file_name() {
-                    *dest_path = download_dir.join(filename);
+                match dest_path.file_name() {
+                    Some(filename) => *dest_path = download_dir.join(filename),
+                    None => {
+                        eprintln!("Blocked download with no valid filename");
+                        return false;
+                    }
                 }
             }
             true

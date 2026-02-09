@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// Sanitize an app ID for safe use in filesystem paths and desktop entry filenames.
 /// Removes path separators and traversal sequences.
-fn sanitize_app_id(id: &str) -> String {
+pub fn sanitize_app_id(id: &str) -> String {
     id.replace(['/', '\\', '\0'], "")
         .replace("..", "")
 }

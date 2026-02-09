@@ -12,9 +12,16 @@ use tokio::fs::remove_file;
 use crate::APP_ID;
 
 /// Sanitize a string for use in a desktop entry field.
-/// Strips newlines and carriage returns to prevent key injection.
+/// Strips newlines, carriage returns, tabs, backslashes, semicolons,
+/// and all ASCII control characters to prevent key injection and value manipulation.
 fn sanitize_desktop_field(s: &str) -> String {
-    s.chars().filter(|c| *c != '\n' && *c != '\r').collect()
+    s.chars()
+        .filter(|c| {
+            !c.is_ascii_control() // strips \n, \r, \t, and all chars < 0x20
+                && *c != '\\'
+                && *c != ';'
+        })
+        .collect()
 }
 
 pub fn webapplauncher_is_valid(
@@ -160,13 +167,89 @@ pub fn export_all(path: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-/// Import web apps from a RON file. Returns the number of apps imported.
+/// Maximum size for an import file (1 MB).
+const MAX_IMPORT_FILE_SIZE: u64 = 1024 * 1024;
+/// Maximum number of apps allowed in a single import.
+const MAX_IMPORT_APPS: usize = 500;
+
+/// Validate and sanitize an imported web app. Returns None if the app is invalid.
+fn validate_imported_app(mut app: WebAppLauncher) -> Option<WebAppLauncher> {
+    // Sanitize app_id to prevent path traversal
+    let safe_id = crate::browser::sanitize_app_id(&app.browser.app_id.id);
+    if safe_id.is_empty() {
+        tracing::warn!("Rejecting imported app with empty app_id after sanitization");
+        return None;
+    }
+    app.browser.app_id = crate::WebviewArgs { id: safe_id };
+
+    // Validate URL is http/https
+    if let Some(ref url) = app.browser.url {
+        if !crate::url_valid(url) {
+            tracing::warn!("Rejecting imported app '{}': invalid URL", app.name);
+            return None;
+        }
+    }
+
+    // Validate required fields are non-empty
+    if app.name.is_empty() || app.icon.is_empty() {
+        tracing::warn!("Rejecting imported app: empty name or icon");
+        return None;
+    }
+
+    // Truncate name to reasonable length
+    if app.name.len() > 256 {
+        app.name.truncate(256);
+    }
+
+    // Validate category is not None
+    if app.category == crate::Category::None {
+        tracing::warn!("Rejecting imported app '{}': no category", app.name);
+        return None;
+    }
+
+    // Validate profile path is within expected directory (if set)
+    if let Some(ref profile) = app.browser.profile {
+        if let Some(xdg_data) = dirs::data_dir() {
+            let expected_prefix = xdg_data.join(crate::APP_ID).join("profiles");
+            if !profile.starts_with(&expected_prefix) {
+                tracing::warn!(
+                    "Rejecting imported app '{}': profile path outside expected directory",
+                    app.name
+                );
+                app.browser.profile = None;
+            }
+        }
+    }
+
+    Some(app)
+}
+
+/// Import web apps from a RON file. Returns validated apps ready for saving.
 pub fn import_all(path: &std::path::Path) -> Result<Vec<WebAppLauncher>, Box<dyn std::error::Error>> {
     let metadata = std::fs::metadata(path)?;
-    if metadata.len() > MAX_RON_FILE_SIZE * 100 {
-        return Err("Import file too large".into());
+    if metadata.len() > MAX_IMPORT_FILE_SIZE {
+        return Err(format!(
+            "Import file too large: {} bytes (max {} bytes)",
+            metadata.len(),
+            MAX_IMPORT_FILE_SIZE
+        ).into());
     }
     let content = std::fs::read_to_string(path)?;
     let apps: Vec<WebAppLauncher> = ron::from_str(&content)?;
-    Ok(apps)
+
+    if apps.len() > MAX_IMPORT_APPS {
+        return Err(format!(
+            "Import contains too many apps: {} (max {})",
+            apps.len(),
+            MAX_IMPORT_APPS
+        ).into());
+    }
+
+    // Validate and sanitize each imported app
+    let validated: Vec<WebAppLauncher> = apps
+        .into_iter()
+        .filter_map(validate_imported_app)
+        .collect();
+
+    Ok(validated)
 }
