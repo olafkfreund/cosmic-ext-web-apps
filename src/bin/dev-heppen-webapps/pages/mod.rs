@@ -306,12 +306,13 @@ impl Application for QuickWebApps {
                 self.nav.remove(id);
                 self.dialogs = None;
                 self.page = Page::Editor(AppEditor::default());
-                tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-deleted"))));
+                tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-deleted"))).map(cosmic::Action::App));
             }
             Message::DuplicateApp(editor) => {
                 self.page = Page::Editor(*editor);
                 // Select the "Create new" entry so the user can save the duplicate
-                if let Some(first) = self.nav.iter().next() {
+                let first_entity = { self.nav.iter().next() };
+                if let Some(first) = first_entity {
                     self.nav.activate(first);
                 }
             }
@@ -340,9 +341,11 @@ impl Application for QuickWebApps {
             }
             Message::ExportApps => {
                 return task::future(async {
+                    let title = fl!("file-dialog-export-title");
+                    let label = fl!("file-dialog-save");
                     let response = match SelectedFiles::save_file()
-                        .title(fl!("file-dialog-export-title"))
-                        .accept_label(fl!("file-dialog-save"))
+                        .title(title.as_str())
+                        .accept_label(label.as_str())
                         .modal(true)
                         .current_name("webapps-export.ron")
                         .send()
@@ -382,21 +385,24 @@ impl Application for QuickWebApps {
                     Ok(()) => {
                         tasks.push(self.toasts.push(
                             widget::toaster::Toast::new(fl!("toast-export-success")),
-                        ));
+                        ).map(cosmic::Action::App));
                     }
                     Err(msg) => {
-                        tasks.push(self.toasts.push(widget::toaster::Toast::new(msg)));
+                        tasks.push(self.toasts.push(widget::toaster::Toast::new(msg)).map(cosmic::Action::App));
                     }
                 }
             }
             Message::ImportApps => {
                 return task::future(async {
+                    let title = fl!("file-dialog-import-title");
+                    let label = fl!("file-dialog-import");
+                    let filter_name = fl!("file-filter-ron");
                     let response = match SelectedFiles::open_file()
-                        .title(fl!("file-dialog-import-title"))
-                        .accept_label(fl!("file-dialog-import"))
+                        .title(title.as_str())
+                        .accept_label(label.as_str())
                         .modal(true)
                         .multiple(false)
-                        .filter(FileFilter::new(fl!("file-filter-ron")).glob("*.ron"))
+                        .filter(FileFilter::new(&filter_name).glob("*.ron"))
                         .send()
                         .await
                     {
@@ -428,7 +434,7 @@ impl Application for QuickWebApps {
                             tracing::error!("Failed to decode import file path: {e}");
                             tasks.push(self.toasts.push(
                                 widget::toaster::Toast::new(fl!("toast-import-error")),
-                            ));
+                            ).map(cosmic::Action::App));
                             return Task::batch(tasks);
                         }
                     };
@@ -449,12 +455,12 @@ impl Application for QuickWebApps {
                             };
                             tasks.push(self.toasts.push(
                                 widget::toaster::Toast::new(msg),
-                            ));
+                            ).map(cosmic::Action::App));
                             return Task::batch(
                                 tasks
                                     .into_iter()
                                     .chain(std::iter::once(task::message(
-                                        Message::ReloadNavbarItems,
+                                        cosmic::action::app(Message::ReloadNavbarItems),
                                     ))),
                             );
                         }
@@ -462,7 +468,7 @@ impl Application for QuickWebApps {
                             tracing::error!("Import failed: {e}");
                             tasks.push(self.toasts.push(
                                 widget::toaster::Toast::new(fl!("toast-import-error")),
-                            ));
+                            ).map(cosmic::Action::App));
                         }
                     }
                 }
@@ -507,12 +513,15 @@ impl Application for QuickWebApps {
             }
             Message::ImportThemeFilePicker => {
                 return task::future(async {
+                    let title = fl!("file-dialog-open-theme");
+                    let label = fl!("open");
+                    let filter_name = fl!("file-filter-ron-theme");
                     let response = match SelectedFiles::open_file()
-                        .title(fl!("file-dialog-open-theme"))
-                        .accept_label(fl!("open"))
+                        .title(title.as_str())
+                        .accept_label(label.as_str())
                         .modal(true)
                         .multiple(false)
-                        .filter(FileFilter::new(fl!("file-filter-ron-theme")).glob("*.ron"))
+                        .filter(FileFilter::new(&filter_name).glob("*.ron"))
                         .send()
                         .await
                     {
@@ -634,7 +643,7 @@ impl Application for QuickWebApps {
                     };
                 }
 
-                return task::message(Message::IconsResult(moved));
+                return task::message(cosmic::action::app(Message::IconsResult(moved)));
             }
             Message::OpenIconPicker => {
                 self.dialogs = Some(Dialogs::IconPicker(IconPicker::default()));
@@ -656,7 +665,7 @@ impl Application for QuickWebApps {
                     }
                 }
 
-                tasks.push(task::message(Message::LoadThemes));
+                tasks.push(task::message(cosmic::action::app(Message::LoadThemes)));
             }
             Message::PushIcon(icon) => {
                 if let Some(Dialogs::IconPicker(icon_picker)) = &mut self.dialogs {
@@ -693,9 +702,9 @@ impl Application for QuickWebApps {
                         }
                     }
 
-                    tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-saved"))));
+                    tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-saved"))).map(cosmic::Action::App));
                     return Task::batch(
-                        tasks.into_iter().chain(std::iter::once(task::message(Message::ReloadNavbarItems)))
+                        tasks.into_iter().chain(std::iter::once(task::message(cosmic::action::app(Message::ReloadNavbarItems))))
                     );
                 }
             }

@@ -2,7 +2,6 @@ use clap::Parser;
 use cosmic::{iced_core, iced_winit::graphics::image::image_rs::ImageReader, widget};
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::OsStr,
     fmt::Display,
     fs::{self, create_dir_all},
     io::{Cursor, Read},
@@ -223,7 +222,7 @@ pub fn icon_pack_installed() -> bool {
     packs.iter().any(|theme| icons_dir.join(theme).exists())
 }
 
-pub async fn add_icon_packs_install_script() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn add_icon_packs_install_script() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let install_script = include_bytes!("../resources/scripts/icon-installer.sh");
     let temp_file = format!("/tmp/{}.sh", APP_ID);
 

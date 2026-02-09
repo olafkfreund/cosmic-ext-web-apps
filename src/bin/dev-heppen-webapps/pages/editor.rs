@@ -7,7 +7,6 @@ use cosmic::{
 };
 use rand::{rng, Rng};
 use strum::IntoEnumIterator as _;
-use url::Url;
 use webapps::fl;
 
 use crate::pages;
@@ -291,7 +290,7 @@ impl AppEditor {
 
         widget::tooltip(
             widget::container(ico),
-            fl!("icon-selector"),
+            widget::text(fl!("icon-selector")),
             widget::tooltip::Position::Bottom,
         )
         .into()
@@ -319,9 +318,9 @@ impl AppEditor {
                                             "{}: {}",
                                             fl!("title"),
                                             if self.app_title.is_empty() {
-                                                &fl!("new-webapp-title")
+                                                fl!("new-webapp-title")
                                             } else {
-                                                &self.app_title
+                                                self.app_title.clone()
                                             }
                                         )))
                                         .push(widget::text::title4(format!(
@@ -341,7 +340,7 @@ impl AppEditor {
                 .push(widget::text_input(fl!("title"), &self.app_title).on_input(Message::Title))
                 .push_maybe(
                     if !self.app_title.is_empty() && self.app_title.len() < 3 {
-                        Some(widget::text::caption(fl!("warning.app-name"))
+                        Some(widget::text::caption(fl!("warning-app-name"))
                             .class(style::Text::Accent))
                     } else {
                         None
@@ -364,7 +363,7 @@ impl AppEditor {
                 )
                 .push_maybe(
                     if !self.app_url.is_empty() && !webapps::url_valid(&self.app_url) {
-                        Some(widget::text::caption(fl!("warning.app-url"))
+                        Some(widget::text::caption(fl!("warning-app-url"))
                             .class(style::Text::Accent))
                     } else {
                         None

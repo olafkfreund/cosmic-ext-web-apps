@@ -54,4 +54,5 @@ walkdir = "2.5.0"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
+rev = "4c4eddb50c79ace202c76b0f6972596930537e1b"
 features = ["a11y", "dbus-config", "winit", "multi-window", "wayland", "tokio"]
