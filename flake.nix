@@ -11,6 +11,12 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        # Cargo.toml uses edition = "2024" which requires Rust >= 1.85.0
+        _ = if (builtins.compareVersions pkgs.rustc.version "1.85.0" < 0)
+            then builtins.throw "Rust >= 1.85.0 required for edition 2024 (found ${pkgs.rustc.version}). Update your nixpkgs input."
+            else null;
+
         craneLib = crane.mkLib pkgs;
 
         commonArgs = {
