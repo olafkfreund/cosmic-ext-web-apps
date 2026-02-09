@@ -186,6 +186,9 @@ pub fn icons_location() -> Option<PathBuf> {
     None
 }
 
+/// Copy an icon file to the app icons directory.
+/// This performs synchronous file I/O. If called from an async context,
+/// wrap in `tokio::task::spawn_blocking`.
 pub fn move_icon(path: &str, icon_name: &str, extension: &str) -> Option<PathBuf> {
     if icon_name.contains('/') || icon_name.contains('\\') || icon_name.contains("..") ||
        extension.contains('/') || extension.contains('\\') || extension.contains("..") {
@@ -255,27 +258,40 @@ const MAX_ICON_SEARCH_DEPTH: usize = 8;
 const MAX_ICON_RESULTS: usize = 200;
 
 pub async fn find_icon(path: PathBuf, icon_name: String) -> Vec<String> {
-    let mut icons: Vec<String> = Vec::new();
+    tokio::task::spawn_blocking(move || {
+        let mut icons: Vec<String> = Vec::new();
 
-    for entry in WalkDir::new(&path)
-        .max_depth(MAX_ICON_SEARCH_DEPTH)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if icons.len() >= MAX_ICON_RESULTS {
-            break;
-        }
+        for entry in WalkDir::new(&path)
+            .max_depth(MAX_ICON_SEARCH_DEPTH)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if icons.len() >= MAX_ICON_RESULTS {
+                break;
+            }
 
-        if let Some(filename) = entry.file_name().to_str() {
-            if filename.contains(&icon_name) {
-                if is_svg(filename) {
-                    if let Some(path) = entry.path().to_str() {
-                        if let Ok(buffer) = tokio::fs::read_to_string(&path).await {
-                            let options = usvg::Options::default();
-                            if let Ok(parsed) = usvg::Tree::from_str(&buffer, &options) {
-                                let size = parsed.size();
-                                if size.width() >= ICON_SIZE as f32
-                                    && size.height() >= ICON_SIZE as f32
+            if let Some(filename) = entry.file_name().to_str() {
+                if filename.contains(&icon_name) {
+                    if is_svg(filename) {
+                        if let Some(path) = entry.path().to_str() {
+                            if let Ok(buffer) = std::fs::read_to_string(path) {
+                                let options = usvg::Options::default();
+                                if let Ok(parsed) = usvg::Tree::from_str(&buffer, &options) {
+                                    let size = parsed.size();
+                                    if size.width() >= ICON_SIZE as f32
+                                        && size.height() >= ICON_SIZE as f32
+                                        && !icons.contains(&path.to_string())
+                                    {
+                                        icons.push(path.to_string())
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(path) = entry.path().to_str() {
+                        if let Ok(image) = ImageReader::open(path) {
+                            if let Ok(img) = image.decode() {
+                                if img.width() >= ICON_SIZE
+                                    && img.height() >= ICON_SIZE
                                     && !icons.contains(&path.to_string())
                                 {
                                     icons.push(path.to_string())
@@ -283,23 +299,14 @@ pub async fn find_icon(path: PathBuf, icon_name: String) -> Vec<String> {
                             }
                         }
                     }
-                } else if let Some(path) = entry.path().to_str() {
-                    if let Ok(image) = ImageReader::open(path) {
-                        if let Ok(img) = image.decode() {
-                            if img.width() >= ICON_SIZE
-                                && img.height() >= ICON_SIZE
-                                && !icons.contains(&path.to_string())
-                            {
-                                icons.push(path.to_string())
-                            }
-                        }
-                    }
                 }
             }
         }
-    }
 
-    icons
+        icons
+    })
+    .await
+    .unwrap_or_default()
 }
 
 pub async fn find_icons(icon_name: String) -> Vec<String> {
@@ -319,26 +326,32 @@ pub async fn image_handle(path: String) -> Option<Icon> {
 
             return Some(Icon::new(IconType::Svg(handle), path, false));
         } else {
-            let mut data = Vec::new();
-
-            if let Ok(mut file) = fs::File::open(&result_path) {
+            // Move blocking I/O to spawn_blocking
+            let rp = result_path.clone();
+            let data = tokio::task::spawn_blocking(move || {
+                let mut data = Vec::new();
+                let mut file = std::fs::File::open(&rp).ok()?;
                 if let Err(e) = file.read_to_end(&mut data) {
-                    tracing::warn!("Failed to read icon file {:?}: {e}", result_path);
+                    tracing::warn!("Failed to read icon file {:?}: {e}", rp);
                     return None;
                 }
-            }
 
-            if let Ok(image_reader) = ImageReader::new(Cursor::new(&data)).with_guessed_format() {
-                if let Ok(image) = image_reader.decode() {
-                    if image.width() >= ICON_SIZE && image.height() >= ICON_SIZE {
-                        let handle = iced_core::image::Handle::from_bytes(data);
+                // Validate image dimensions in the blocking thread
+                let image_reader = ImageReader::new(Cursor::new(&data)).with_guessed_format().ok()?;
+                let image = image_reader.decode().ok()?;
+                if image.width() >= ICON_SIZE && image.height() >= ICON_SIZE {
+                    Some(data)
+                } else {
+                    None
+                }
+            })
+            .await
+            .ok()??;
 
-                        return Some(Icon::new(IconType::Raster(handle), path, false));
-                    }
-                };
-            }
+            let handle = iced_core::image::Handle::from_bytes(data);
+            return Some(Icon::new(IconType::Raster(handle), path, false));
         }
-    };
+    }
 
     None
 }

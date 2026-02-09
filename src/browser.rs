@@ -63,14 +63,20 @@ impl Browser {
     }
 
     pub fn from_appid(id: &str) -> Option<Self> {
-        if let Some(launcher) = crate::launcher::installed_webapps()
-            .iter()
-            .find(|launcher| launcher.browser.app_id.as_ref() == id)
-        {
-            return Some(launcher.browser.clone());
-        };
+        let safe_id = sanitize_app_id(id);
+        let db_path = crate::database_path(&format!("{safe_id}.ron"))?;
 
-        None
+        let content = std::fs::read_to_string(&db_path).ok()?;
+
+        // Same 64KB safety limit used in launcher::installed_webapps()
+        const MAX_RON_SIZE: usize = 64 * 1024;
+        if content.len() > MAX_RON_SIZE {
+            tracing::warn!("RON file too large: {}", db_path.display());
+            return None;
+        }
+
+        let launcher: crate::launcher::WebAppLauncher = ron::from_str(&content).ok()?;
+        Some(launcher.browser)
     }
 
     pub fn get_exec(&self) -> String {

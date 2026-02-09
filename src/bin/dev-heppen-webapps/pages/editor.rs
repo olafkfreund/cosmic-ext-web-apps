@@ -83,41 +83,33 @@ pub enum Message {
 }
 
 impl AppEditor {
-    pub fn from(webapp_launcher: webapps::launcher::WebAppLauncher) -> Self {
-        let entry = webapps::launcher::installed_webapps()
-            .into_iter()
-            .find(|webapp| webapp.browser.app_id == webapp_launcher.browser.app_id);
+    pub fn from(launcher: webapps::launcher::WebAppLauncher) -> Self {
+        let window_size = launcher.browser.window_size.clone().unwrap_or_default();
+        let window_decorations = launcher.browser.window_decorations.unwrap_or_default();
+        let incognito = launcher.browser.private_mode.unwrap_or_default();
+        let simulate_mobile = launcher.browser.try_simulate_mobile.unwrap_or_default();
 
-        if let Some(launcher) = entry {
-            let window_size = launcher.browser.window_size.clone().unwrap_or_default();
-            let window_decorations = launcher.browser.window_decorations.unwrap_or_default();
-            let incognito = launcher.browser.private_mode.unwrap_or_default();
-            let simulate_mobile = launcher.browser.try_simulate_mobile.unwrap_or_default();
+        let mut editor = AppEditor::default();
 
-            let mut editor = AppEditor::default();
+        editor.app_browser = Some(launcher.browser.clone());
+        editor.app_title = launcher.name.clone();
+        editor.app_url = launcher.browser.url.clone().unwrap_or_default();
+        editor.app_icon = launcher.icon.clone();
+        editor.app_category = launcher.category.clone();
+        editor.app_persistent = launcher.browser.profile.is_some();
+        editor.app_window_width = window_size.0.to_string();
+        editor.app_window_height = window_size.1.to_string();
+        editor.app_window_size = window_size;
+        editor.app_window_decorations = window_decorations;
+        editor.app_private_mode = incognito;
+        editor.app_simulate_mobile = simulate_mobile;
+        editor.category_idx = editor
+            .categories
+            .iter()
+            .position(|c| c == &launcher.category.name());
+        editor.is_installed = true;
 
-            editor.app_browser = Some(launcher.browser.clone());
-            editor.app_title = launcher.name.clone();
-            editor.app_url = launcher.browser.url.clone().unwrap_or_default();
-            editor.app_icon = launcher.icon.clone();
-            editor.app_category = launcher.category.clone();
-            editor.app_persistent = launcher.browser.profile.is_some();
-            editor.app_window_width = window_size.0.to_string();
-            editor.app_window_height = window_size.1.to_string();
-            editor.app_window_size = window_size.clone();
-            editor.app_window_decorations = window_decorations;
-            editor.app_private_mode = incognito;
-            editor.app_simulate_mobile = simulate_mobile;
-            editor.category_idx = editor
-                .categories
-                .iter()
-                .position(|c| c == &launcher.category.name());
-            editor.is_installed = true;
-
-            editor
-        } else {
-            AppEditor::default()
-        }
+        editor
     }
 
     pub fn update(&mut self, message: Message) -> Task<Action<crate::pages::Message>> {
@@ -147,13 +139,10 @@ impl AppEditor {
             }
             Message::FaviconResult(result) => {
                 if let Some(path) = result {
-                    return task::future(async move {
-                        if let Some(icon) = webapps::image_handle(path).await {
-                            crate::pages::Message::SetIcon(Some(icon))
-                        } else {
-                            crate::pages::Message::None
-                        }
-                    });
+                    return Task::perform(
+                        async move { webapps::image_handle(path).await },
+                        |icon| cosmic::Action::App(crate::pages::Message::SetIcon(icon)),
+                    );
                 }
             }
             Message::Duplicate => {

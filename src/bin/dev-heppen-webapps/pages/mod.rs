@@ -36,7 +36,6 @@ use tokio::{
     process::Command,
     sync::oneshot,
 };
-use tracing::debug;
 use webapps::{fl, APP_ICON, APP_ID, REPOSITORY};
 
 static MENU_ID: LazyLock<cosmic::widget::Id> =
@@ -55,7 +54,6 @@ pub enum Message {
     DownloaderStarted,
     DownloaderStream(String),
     DownloaderStreamFinished,
-    Close,
     IconPicker(iconpicker::Message),
     IconsResult(Vec<String>),
     ImportThemeFilePicker,
@@ -337,7 +335,7 @@ impl Application for QuickWebApps {
             }
             Message::SearchApps(query) => {
                 self.search_query = query;
-                self.rebuild_nav_from_cache();
+                self.rebuild_nav_from_cache(None);
             }
             Message::ExportApps => {
                 return task::future(async {
@@ -489,10 +487,6 @@ impl Application for QuickWebApps {
                     cosmic::action::app(Message::DownloaderDone)
                 });
             }
-            Message::Close => {
-                debug!("should close now...");
-                return Task::none();
-            }
             Message::IconPicker(msg) => {
                 if let Some(Dialogs::IconPicker(icon_picker)) = &mut self.dialogs {
                     tasks.push(icon_picker.update(msg));
@@ -565,7 +559,7 @@ impl Application for QuickWebApps {
                             tracing::error!("Failed to spawn webview: {e}");
                         }
                     },
-                    |_| cosmic::Action::App(Message::Close),
+                    |_| cosmic::Action::App(Message::None),
                 );
             }
             Message::LaunchUrl(url) => match open::that_detached(&url) {
@@ -679,7 +673,7 @@ impl Application for QuickWebApps {
                     let cat_cmp = a.category.name().cmp(&b.category.name());
                     cat_cmp.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
                 });
-                self.rebuild_nav_from_cache();
+                self.rebuild_nav_from_cache(None);
             }
             Message::ResetSettings => {
                 if let Some(handler) = AppConfig::config_handler() {
@@ -692,20 +686,33 @@ impl Application for QuickWebApps {
                 if let Some(location) =
                     webapps::database_path(&format!("{}.ron", launcher.browser.app_id.as_ref()))
                 {
-                    let content = to_string_pretty(&launcher, ron::ser::PrettyConfig::default());
+                    let save_result = (|| -> Result<(), Box<dyn std::error::Error>> {
+                        let content = to_string_pretty(&launcher, ron::ser::PrettyConfig::default())?;
+                        let mut f = std::fs::File::create(&location)?;
+                        f.write_all(content.as_bytes())?;
+                        Ok(())
+                    })();
 
-                    if let Ok(content) = content {
-                        let file = std::fs::File::create(location);
-
-                        if let Ok(mut f) = file {
-                            let _ = f.write_all(content.as_bytes());
+                    match save_result {
+                        Ok(()) => {
+                            tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-saved"))).map(cosmic::Action::App));
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to save web app: {e}");
+                            tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-save-error"))).map(cosmic::Action::App));
+                            return Task::batch(tasks);
                         }
                     }
 
-                    tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-saved"))).map(cosmic::Action::App));
-                    return Task::batch(
-                        tasks.into_iter().chain(std::iter::once(task::message(cosmic::action::app(Message::ReloadNavbarItems))))
-                    );
+                    // Reload and re-select saved app
+                    self.cached_apps = webapps::launcher::installed_webapps();
+                    self.cached_apps.sort_by(|a, b| {
+                        let cat_cmp = a.category.name().cmp(&b.category.name());
+                        cat_cmp.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                    let app_id = launcher.browser.app_id.as_ref().to_string();
+                    self.rebuild_nav_from_cache(Some(&app_id));
+                    return Task::batch(tasks);
                 }
             }
             Message::SetIcon(icon) => {
@@ -935,7 +942,8 @@ impl Application for QuickWebApps {
 
 impl QuickWebApps {
     /// Rebuild the nav bar from the in-memory app cache, applying the current search filter.
-    fn rebuild_nav_from_cache(&mut self) {
+    /// If select_app_id is provided, attempts to re-select that app after rebuilding.
+    fn rebuild_nav_from_cache(&mut self, select_app_id: Option<&str>) {
         self.nav.clear();
 
         self.nav
@@ -946,6 +954,7 @@ impl QuickWebApps {
             .activate();
 
         let query = self.search_query.to_lowercase();
+        let mut selected_entity = None;
 
         for app in &self.cached_apps {
             if !query.is_empty() && !app.name.to_lowercase().contains(&query) {
@@ -957,9 +966,31 @@ impl QuickWebApps {
                 .text(app.name.clone())
                 .data::<Page>(Page::Editor(editor::AppEditor::from(app.clone())))
                 .closable();
+
+            // Check if this is the app we want to re-select
+            if let Some(target_id) = select_app_id {
+                if app.browser.app_id.as_ref() == target_id {
+                    // Find the entity we just inserted by iterating and comparing data
+                    for entity in self.nav.iter() {
+                        if let Some(Page::Editor(editor)) = self.nav.data::<Page>(entity) {
+                            if let Some(browser) = &editor.app_browser {
+                                if browser.app_id.as_ref() == target_id {
+                                    selected_entity = Some((entity, app.clone()));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        self.page = Page::Editor(AppEditor::default());
+        if let Some((entity, app)) = selected_entity {
+            self.nav.activate(entity);
+            self.page = Page::Editor(editor::AppEditor::from(app));
+        } else {
+            self.page = Page::Editor(AppEditor::default());
+        }
     }
 
     fn about(&self) -> Element<'_, Message> {

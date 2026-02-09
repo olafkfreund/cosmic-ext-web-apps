@@ -117,3 +117,4 @@ file-filter-svg=SVG Images
 # toast notifications
 toast-app-saved=Web app saved successfully
 toast-app-deleted=Web app deleted
+toast-save-error=Failed to save web app
