@@ -74,6 +74,7 @@ pub enum Message {
     SetIcon(Option<webapps::Icon>),
     Surface(surface::Action),
     DownloaderStop,
+    SearchApps(String),
     ToggleContextPage(ContextPage),
     UpdateConfig(AppConfig),
     UpdateTheme(Box<Theme>),
@@ -104,6 +105,7 @@ pub struct QuickWebApps {
     downloader_started: bool,
     downloader_id: usize,
     downloader_output: String,
+    search_query: String,
     themes_list: Vec<Theme>,
     theme_idx: Option<usize>,
     toasts: widget::toaster::Toasts<Message>,
@@ -139,6 +141,13 @@ impl Application for QuickWebApps {
             },
             MenuAction::NewApp,
         );
+        key_binds.insert(
+            menu::KeyBind {
+                modifiers: vec![menu::key_bind::Modifier::Ctrl],
+                key: cosmic::iced_core::keyboard::Key::Character("s".into()),
+            },
+            MenuAction::Save,
+        );
 
         let windows = QuickWebApps {
             core,
@@ -151,6 +160,7 @@ impl Application for QuickWebApps {
             downloader_started: false,
             downloader_id: 1,
             downloader_output: String::new(),
+            search_query: String::new(),
             themes_list,
             theme_idx: Some(0),
             toasts: widget::toaster::Toasts::new(Message::CloseToast),
@@ -310,6 +320,10 @@ impl Application for QuickWebApps {
                         self.downloader_output = self.downloader_output[trim_at + newline + 1..].to_string();
                     }
                 }
+            }
+            Message::SearchApps(query) => {
+                self.search_query = query;
+                return task::message(cosmic::action::app(Message::ReloadNavbarItems));
             }
             Message::DownloaderStop => {
                 self.downloader_started = false;
@@ -514,9 +528,21 @@ impl Application for QuickWebApps {
                     .data::<Page>(Page::Editor(AppEditor::default()))
                     .activate();
 
-                webapps::launcher::installed_webapps()
+                let query = self.search_query.to_lowercase();
+
+                let mut apps: Vec<_> = webapps::launcher::installed_webapps()
                     .into_iter()
-                    .for_each(|app| {
+                    .filter(|app| {
+                        query.is_empty() || app.name.to_lowercase().contains(&query)
+                    })
+                    .collect();
+
+                apps.sort_by(|a, b| {
+                    let cat_cmp = a.category.name().cmp(&b.category.name());
+                    cat_cmp.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                });
+
+                apps.into_iter().for_each(|app| {
                         self.nav
                             .insert()
                             .icon(widget::icon::from_name(app.icon.clone()))
@@ -611,27 +637,33 @@ impl Application for QuickWebApps {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Message>> {
-        vec![responsive_menu_bar()
-            .item_height(ItemHeight::Dynamic(40))
-            .item_width(ItemWidth::Uniform(240))
-            .spacing(4.0)
-            .into_element(
-                &self.core,
-                &self.key_binds,
-                MENU_ID.clone(),
-                Message::Surface,
-                vec![
-                    (
-                        fl!("app"),
-                        vec![
-                            menu::Item::Button(fl!("new-app"), None, MenuAction::NewApp),
-                            menu::Item::Divider,
-                            menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
-                            menu::Item::Button(fl!("about"), None, MenuAction::About),
-                        ],
-                    ),
-                ],
-            )]
+        vec![
+            responsive_menu_bar()
+                .item_height(ItemHeight::Dynamic(40))
+                .item_width(ItemWidth::Uniform(240))
+                .spacing(4.0)
+                .into_element(
+                    &self.core,
+                    &self.key_binds,
+                    MENU_ID.clone(),
+                    Message::Surface,
+                    vec![
+                        (
+                            fl!("app"),
+                            vec![
+                                menu::Item::Button(fl!("new-app"), None, MenuAction::NewApp),
+                                menu::Item::Divider,
+                                menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
+                                menu::Item::Button(fl!("about"), None, MenuAction::About),
+                            ],
+                        ),
+                    ],
+                ),
+            widget::text_input(fl!("search"), &self.search_query)
+                .on_input(Message::SearchApps)
+                .width(Length::Fixed(200.0))
+                .into(),
+        ]
     }
 
     fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Message>>> {
@@ -699,7 +731,29 @@ impl Application for QuickWebApps {
     fn view(&self) -> Element<'_, Message> {
         let Page::Editor(content) = &self.page;
 
-        let main_content = widget::container(content.view().map(Message::Editor))
+        // nav has 1 entry (the "Create new" placeholder) when no apps are installed
+        let has_installed_apps = self.nav.iter().count() > 1;
+
+        let mut col = widget::column().spacing(12);
+
+        if !has_installed_apps && !content.is_installed {
+            col = col.push(
+                widget::container(
+                    widget::column()
+                        .spacing(8)
+                        .push(widget::text::title3(fl!("create-new-webapp")))
+                        .push(widget::text::body(fl!("not-installed-header")))
+                        .align_x(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .align_x(Horizontal::Center)
+                .padding([24, 0, 0, 0]),
+            );
+        }
+
+        col = col.push(content.view().map(Message::Editor));
+
+        let main_content = widget::container(col)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Center)
@@ -822,6 +876,7 @@ pub enum ContextPage {
 pub enum MenuAction {
     About,
     NewApp,
+    Save,
     Settings,
 }
 
@@ -832,6 +887,7 @@ impl menu::action::MenuAction for MenuAction {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
             MenuAction::NewApp => Message::ReloadNavbarItems,
+            MenuAction::Save => Message::Editor(editor::Message::Done),
             MenuAction::Settings => Message::ToggleContextPage(ContextPage::Settings),
         }
     }

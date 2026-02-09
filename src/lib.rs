@@ -88,6 +88,40 @@ pub fn profiles_path(app_id: &str) -> Option<PathBuf> {
     None
 }
 
+/// Download a favicon for the given URL and save it to the icons directory.
+/// Returns the path to the saved favicon file on success.
+pub async fn download_favicon(url_str: &str) -> Option<String> {
+    let parsed = url::Url::parse(url_str).ok()?;
+    let domain = parsed.host_str()?;
+
+    let favicon_url = format!(
+        "https://www.google.com/s2/favicons?domain={domain}&sz=128"
+    );
+
+    let response = tokio::process::Command::new("wget")
+        .arg("-q")
+        .arg("-O")
+        .arg("-")
+        .arg(&favicon_url)
+        .output()
+        .await
+        .ok()?;
+
+    if !response.status.success() || response.stdout.is_empty() {
+        return None;
+    }
+
+    let icons_dir = icons_location()?;
+    if !icons_dir.exists() {
+        create_dir_all(&icons_dir).ok()?;
+    }
+
+    let favicon_path = icons_dir.join(format!("favicon-{domain}.png"));
+    tokio::fs::write(&favicon_path, &response.stdout).await.ok()?;
+
+    Some(favicon_path.to_string_lossy().to_string())
+}
+
 pub fn icons_location() -> Option<PathBuf> {
     if let Some(xdg_data) = dirs::data_dir() {
         return Some(xdg_data.join(APP_ID).join("icons"));

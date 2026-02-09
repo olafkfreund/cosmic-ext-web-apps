@@ -7,6 +7,7 @@ use cosmic::{
 };
 use rand::{rng, Rng};
 use strum::IntoEnumIterator as _;
+use url::Url;
 use webapps::fl;
 
 use crate::pages;
@@ -62,6 +63,8 @@ impl Default for AppEditor {
 pub enum Message {
     Category(usize),
     Done,
+    DownloadFavicon,
+    FaviconResult(Option<String>),
     PersistentProfile(bool),
     LaunchApp,
     OpenIconPicker,
@@ -123,6 +126,30 @@ impl AppEditor {
             Message::Category(idx) => {
                 self.app_category = webapps::Category::from_index(idx as u8);
                 self.category_idx = Some(idx);
+            }
+            Message::DownloadFavicon => {
+                let url = self.app_url.clone();
+                if webapps::url_valid(&url) {
+                    return Task::perform(
+                        async move { webapps::download_favicon(&url).await },
+                        |result| {
+                            cosmic::Action::App(crate::pages::Message::Editor(
+                                Message::FaviconResult(result),
+                            ))
+                        },
+                    );
+                }
+            }
+            Message::FaviconResult(result) => {
+                if let Some(path) = result {
+                    return task::future(async move {
+                        if let Some(icon) = webapps::image_handle(path).await {
+                            crate::pages::Message::SetIcon(Some(icon))
+                        } else {
+                            crate::pages::Message::None
+                        }
+                    });
+                }
             }
             Message::Done => {
                 let browser = if let Some(browser) = &self.app_browser {
@@ -234,7 +261,12 @@ impl AppEditor {
                 .on_press(Message::OpenIconPicker)
         };
 
-        widget::container(ico).into()
+        widget::tooltip(
+            widget::container(ico),
+            fl!("icon-selector"),
+            widget::tooltip::Position::Bottom,
+        )
+        .into()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -287,7 +319,21 @@ impl AppEditor {
                         None
                     }
                 )
-                .push(widget::text_input(fl!("url"), &self.app_url).on_input(Message::Url))
+                .push(
+                    widget::row()
+                        .spacing(8)
+                        .push(widget::text_input(fl!("url"), &self.app_url).on_input(Message::Url))
+                        .push(
+                            widget::button::standard(fl!("download-favicon"))
+                                .on_press_maybe(
+                                    if webapps::url_valid(&self.app_url) {
+                                        Some(Message::DownloadFavicon)
+                                    } else {
+                                        None
+                                    }
+                                ),
+                        ),
+                )
                 .push_maybe(
                     if !self.app_url.is_empty() && !webapps::url_valid(&self.app_url) {
                         Some(widget::text::caption(fl!("warning.app-url"))

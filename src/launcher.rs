@@ -101,6 +101,10 @@ impl WebAppLauncher {
         desktop_entry.push_str(&format!("Exec={safe_exec}\n"));
         desktop_entry.push_str(&format!("StartupWMClass={safe_wm_class}\n"));
         desktop_entry.push_str(&format!("Categories={}\n", self.category.as_ref()));
+        desktop_entry.push_str("Actions=new-window;\n");
+        desktop_entry.push_str("\n[Desktop Action new-window]\n");
+        desktop_entry.push_str("Name=New Window\n");
+        desktop_entry.push_str(&format!("Exec={safe_exec}\n"));
 
         let proxy = DynamicLauncherProxy::new().await?;
 
