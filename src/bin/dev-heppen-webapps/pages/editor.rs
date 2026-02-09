@@ -64,6 +64,7 @@ pub enum Message {
     Category(usize),
     Done,
     DownloadFavicon,
+    Duplicate,
     FaviconResult(Option<String>),
     PersistentProfile(bool),
     LaunchApp,
@@ -150,6 +151,15 @@ impl AppEditor {
                         }
                     });
                 }
+            }
+            Message::Duplicate => {
+                let mut duplicate = self.clone();
+                duplicate.app_title = format!("Copy of {}", self.app_title);
+                duplicate.app_browser = None;
+                duplicate.is_installed = false;
+                return task::future(async move {
+                    crate::pages::Message::DuplicateApp(Box::new(duplicate))
+                });
             }
             Message::Done => {
                 let browser = if let Some(browser) = &self.app_browser {
@@ -395,6 +405,14 @@ impl AppEditor {
                     widget::row()
                         .spacing(8)
                         .push(widget::horizontal_space())
+                        .push_maybe(if !self.is_installed {
+                            None
+                        } else {
+                            Some(
+                                widget::button::standard(fl!("duplicate"))
+                                    .on_press(Message::Duplicate),
+                            )
+                        })
                         .push_maybe(if !self.is_installed {
                             None
                         } else {

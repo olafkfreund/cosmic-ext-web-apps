@@ -71,6 +71,7 @@ fn main() -> wry::Result<()> {
     let mut builder = WebViewBuilder::new_with_web_context(&mut context)
         .with_url(&url)
         .with_incognito(browser.private_mode.unwrap_or(false))
+        .with_devtools(false)
         .with_navigation_handler(|nav_url| {
             if is_url_safe(&nav_url) {
                 true
@@ -80,13 +81,25 @@ fn main() -> wry::Result<()> {
             }
         })
         .with_new_window_req_handler(|new_url, _features| {
-            // Only allow new windows with safe URL schemes
             if is_url_safe(&new_url) {
                 wry::NewWindowResponse::Allow
             } else {
                 eprintln!("Blocked new window with unsafe URL: {new_url}");
                 wry::NewWindowResponse::Deny
             }
+        })
+        .with_download_started_handler(|url, dest_path| {
+            if !is_url_safe(&url) {
+                eprintln!("Blocked download from unsafe URL: {url}");
+                return false;
+            }
+            // Redirect downloads to XDG download directory
+            if let Some(download_dir) = dirs::download_dir() {
+                if let Some(filename) = dest_path.file_name() {
+                    *dest_path = download_dir.join(filename);
+                }
+            }
+            true
         });
 
     if let Some(true) = browser.try_simulate_mobile {

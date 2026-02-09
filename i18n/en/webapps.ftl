@@ -91,6 +91,15 @@ warning=You don't meet requirements
     .app-icon=  - You must select an Icon for your launcher
     .app-browser=  - Please select a browser. Make sure at least one is installed system-wide or via Flatpak
 
+# import/export
+export-apps=Export all apps
+import-apps=Import apps
+toast-export-success=Apps exported successfully
+toast-import-success=Apps imported successfully
+toast-export-error=Failed to export apps
+toast-import-error=Failed to import apps
+duplicate=Duplicate
+
 # toast notifications
 toast-app-saved=Web app saved successfully
 toast-app-deleted=Web app deleted

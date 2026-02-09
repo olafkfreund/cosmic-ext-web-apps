@@ -150,3 +150,23 @@ impl WebAppLauncher {
         Ok(())
     }
 }
+
+/// Export all installed web apps to a RON file.
+pub fn export_all(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let apps = installed_webapps();
+    let config = ron::ser::PrettyConfig::default();
+    let content = ron::ser::to_string_pretty(&apps, config)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+/// Import web apps from a RON file. Returns the number of apps imported.
+pub fn import_all(path: &std::path::Path) -> Result<Vec<WebAppLauncher>, Box<dyn std::error::Error>> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > MAX_RON_FILE_SIZE * 100 {
+        return Err("Import file too large".into());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let apps: Vec<WebAppLauncher> = ron::from_str(&content)?;
+    Ok(apps)
+}

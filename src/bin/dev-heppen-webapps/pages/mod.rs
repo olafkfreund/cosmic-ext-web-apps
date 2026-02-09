@@ -51,6 +51,7 @@ pub enum Message {
     Editor(editor::Message),
     Delete(widget::segmented_button::Entity),
     DeletionDone(widget::segmented_button::Entity),
+    DuplicateApp(Box<editor::AppEditor>),
     DownloaderDone,
     DownloaderStarted,
     DownloaderStream(String),
@@ -74,6 +75,11 @@ pub enum Message {
     SetIcon(Option<webapps::Icon>),
     Surface(surface::Action),
     DownloaderStop,
+    ExportApps,
+    ExportAppsResult(Result<(), String>),
+    ImportApps,
+    ImportAppsFilePicked(Vec<String>),
+    ImportAppsResult(Result<usize, String>),
     SearchApps(String),
     ToggleContextPage(ContextPage),
     UpdateConfig(AppConfig),
@@ -302,6 +308,13 @@ impl Application for QuickWebApps {
                 self.page = Page::Editor(AppEditor::default());
                 tasks.push(self.toasts.push(widget::toaster::Toast::new(fl!("toast-app-deleted"))));
             }
+            Message::DuplicateApp(editor) => {
+                self.page = Page::Editor(*editor);
+                // Select the "Create new" entry so the user can save the duplicate
+                if let Some(first) = self.nav.iter().next() {
+                    self.nav.activate(first);
+                }
+            }
             Message::DownloaderDone => {
                 self.downloader_started = false;
                 return task::message(cosmic::action::app(Message::CloseDialog));
@@ -324,6 +337,143 @@ impl Application for QuickWebApps {
             Message::SearchApps(query) => {
                 self.search_query = query;
                 return task::message(cosmic::action::app(Message::ReloadNavbarItems));
+            }
+            Message::ExportApps => {
+                return task::future(async {
+                    let response = match SelectedFiles::save_file()
+                        .title("Export Web Apps")
+                        .accept_label("Save")
+                        .modal(true)
+                        .current_name("webapps-export.ron")
+                        .send()
+                        .await
+                    {
+                        Ok(r) => r.response(),
+                        Err(e) => {
+                            tracing::error!("Failed to open save dialog: {e}");
+                            return cosmic::action::app(Message::ExportAppsResult(
+                                Err(fl!("toast-export-error")),
+                            ));
+                        }
+                    };
+
+                    if let Ok(result) = response {
+                        let uris = result.uris();
+                        if let Some(uri) = uris.first() {
+                            let path = std::path::PathBuf::from(uri.path());
+                            match webapps::launcher::export_all(&path) {
+                                Ok(()) => {
+                                    return cosmic::action::app(Message::ExportAppsResult(Ok(())));
+                                }
+                                Err(e) => {
+                                    tracing::error!("Export failed: {e}");
+                                    return cosmic::action::app(Message::ExportAppsResult(
+                                        Err(fl!("toast-export-error")),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    cosmic::action::none()
+                });
+            }
+            Message::ExportAppsResult(result) => {
+                match result {
+                    Ok(()) => {
+                        tasks.push(self.toasts.push(
+                            widget::toaster::Toast::new(fl!("toast-export-success")),
+                        ));
+                    }
+                    Err(msg) => {
+                        tasks.push(self.toasts.push(widget::toaster::Toast::new(msg)));
+                    }
+                }
+            }
+            Message::ImportApps => {
+                return task::future(async {
+                    let response = match SelectedFiles::open_file()
+                        .title("Import Web Apps")
+                        .accept_label("Import")
+                        .modal(true)
+                        .multiple(false)
+                        .filter(FileFilter::new("RON export").glob("*.ron"))
+                        .send()
+                        .await
+                    {
+                        Ok(r) => r.response(),
+                        Err(e) => {
+                            tracing::error!("Failed to open import dialog: {e}");
+                            return cosmic::action::app(Message::ImportAppsResult(
+                                Err(fl!("toast-import-error")),
+                            ));
+                        }
+                    };
+
+                    if let Ok(result) = response {
+                        let files: Vec<String> = result
+                            .uris()
+                            .iter()
+                            .map(|file| file.path().to_string())
+                            .collect();
+                        if !files.is_empty() {
+                            return cosmic::action::app(Message::ImportAppsFilePicked(files));
+                        }
+                    }
+                    cosmic::action::none()
+                });
+            }
+            Message::ImportAppsFilePicked(files) => {
+                if let Some(file) = files.first() {
+                    let decoded = urlencoding::decode(file).unwrap_or_default().to_string();
+                    let path = std::path::PathBuf::from(&decoded);
+
+                    match webapps::launcher::import_all(&path) {
+                        Ok(apps) => {
+                            let count = apps.len();
+                            for app in apps {
+                                if let Some(location) = webapps::database_path(
+                                    &format!("{}.ron", app.browser.app_id.as_ref()),
+                                ) {
+                                    let config =
+                                        ron::ser::PrettyConfig::default();
+                                    if let Ok(content) =
+                                        ron::ser::to_string_pretty(&app, config)
+                                    {
+                                        let _ = std::fs::write(location, content);
+                                    }
+                                }
+                            }
+                            tasks.push(self.toasts.push(
+                                widget::toaster::Toast::new(fl!("toast-import-success")),
+                            ));
+                            return Task::batch(
+                                tasks
+                                    .into_iter()
+                                    .chain(std::iter::once(task::message(
+                                        Message::ReloadNavbarItems,
+                                    ))),
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Import failed: {e}");
+                            tasks.push(self.toasts.push(
+                                widget::toaster::Toast::new(fl!("toast-import-error")),
+                            ));
+                        }
+                    }
+                }
+            }
+            Message::ImportAppsResult(result) => {
+                match result {
+                    Ok(_) => {
+                        tasks.push(self.toasts.push(
+                            widget::toaster::Toast::new(fl!("toast-import-success")),
+                        ));
+                    }
+                    Err(msg) => {
+                        tasks.push(self.toasts.push(widget::toaster::Toast::new(msg)));
+                    }
+                }
             }
             Message::DownloaderStop => {
                 self.downloader_started = false;
@@ -653,6 +803,9 @@ impl Application for QuickWebApps {
                             vec![
                                 menu::Item::Button(fl!("new-app"), None, MenuAction::NewApp),
                                 menu::Item::Divider,
+                                menu::Item::Button(fl!("export-apps"), None, MenuAction::ExportApps),
+                                menu::Item::Button(fl!("import-apps"), None, MenuAction::ImportApps),
+                                menu::Item::Divider,
                                 menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
                                 menu::Item::Button(fl!("about"), None, MenuAction::About),
                             ],
@@ -875,6 +1028,8 @@ pub enum ContextPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
+    ExportApps,
+    ImportApps,
     NewApp,
     Save,
     Settings,
@@ -886,6 +1041,8 @@ impl menu::action::MenuAction for MenuAction {
     fn message(&self) -> Self::Message {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::ExportApps => Message::ExportApps,
+            MenuAction::ImportApps => Message::ImportApps,
             MenuAction::NewApp => Message::ReloadNavbarItems,
             MenuAction::Save => Message::Editor(editor::Message::Done),
             MenuAction::Settings => Message::ToggleContextPage(ContextPage::Settings),
