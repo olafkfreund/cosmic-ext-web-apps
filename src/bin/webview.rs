@@ -46,6 +46,9 @@ fn main() -> wry::Result<()> {
 
     let event_loop = EventLoopBuilder::new().with_any_thread(true).build();
 
+    // Clone title before window builder consumes it (needed for notification forwarding)
+    let app_title_for_notifications = browser.window_title.clone().unwrap_or_else(|| "Web App".to_string());
+
     let mut attrs = WindowAttributes::default();
     if let Some(size) = browser.window_size {
         attrs.inner_size = Some(Size::new(LogicalSize::new(size.0, size.1)));
@@ -106,9 +109,115 @@ fn main() -> wry::Result<()> {
             true
         });
 
+    // Issue #38: Apply user agent (try_simulate_mobile takes precedence for backwards compat)
     if let Some(true) = browser.try_simulate_mobile {
         builder = builder.with_user_agent(webapps::MOBILE_UA);
-    };
+    } else if let Some(ref ua) = browser.user_agent {
+        match ua {
+            webapps::browser::UserAgent::Default => {}
+            webapps::browser::UserAgent::Mobile => {
+                builder = builder.with_user_agent(webapps::MOBILE_UA);
+            }
+            webapps::browser::UserAgent::Custom(custom_ua) => {
+                if !custom_ua.trim().is_empty() {
+                    builder = builder.with_user_agent(custom_ua);
+                }
+            }
+        }
+    }
+
+    // Issue #35: Enforce permission policies via JavaScript injection
+    let perms = browser.permissions.clone().unwrap_or_default();
+    let mut permission_overrides = Vec::new();
+
+    if !perms.allow_camera || !perms.allow_microphone {
+        // Override getUserMedia to block camera/mic
+        let block_video = if !perms.allow_camera { "true" } else { "false" };
+        let block_audio = if !perms.allow_microphone { "true" } else { "false" };
+        permission_overrides.push(format!(
+            r#"(function(){{
+                var origGetUserMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+                if (origGetUserMedia) {{
+                    navigator.mediaDevices.getUserMedia = function(constraints) {{
+                        if ({block_video} && constraints && constraints.video) {{
+                            return Promise.reject(new DOMException('Camera access denied by app settings', 'NotAllowedError'));
+                        }}
+                        if ({block_audio} && constraints && constraints.audio) {{
+                            return Promise.reject(new DOMException('Microphone access denied by app settings', 'NotAllowedError'));
+                        }}
+                        return origGetUserMedia.call(navigator.mediaDevices, constraints);
+                    }};
+                }}
+            }})()"#
+        ));
+    }
+
+    if !perms.allow_geolocation {
+        permission_overrides.push(
+            r#"(function(){
+                navigator.geolocation.getCurrentPosition = function(s, e) {
+                    if (e) e({ code: 1, message: 'Geolocation denied by app settings', PERMISSION_DENIED: 1 });
+                };
+                navigator.geolocation.watchPosition = function(s, e) {
+                    if (e) e({ code: 1, message: 'Geolocation denied by app settings', PERMISSION_DENIED: 1 });
+                    return 0;
+                };
+            })()"#.to_string()
+        );
+    }
+
+    if !perms.allow_notifications {
+        permission_overrides.push(
+            r#"(function(){
+                window.Notification = class {
+                    constructor() { throw new DOMException('Notifications denied by app settings', 'NotAllowedError'); }
+                    static get permission() { return 'denied'; }
+                    static requestPermission() { return Promise.resolve('denied'); }
+                };
+            })()"#.to_string()
+        );
+    }
+
+    for script in &permission_overrides {
+        builder = builder.with_initialization_script(script);
+    }
+
+    // Issue #39: Forward web notifications to COSMIC desktop notifications
+    if perms.allow_notifications {
+        builder = builder.with_initialization_script(
+            r#"(function(){
+                window.Notification = class extends EventTarget {
+                    constructor(title, options) {
+                        super();
+                        window.ipc.postMessage(JSON.stringify({
+                            type: 'notification',
+                            title: title || '',
+                            body: (options && options.body) || ''
+                        }));
+                    }
+                    static get permission() { return 'granted'; }
+                    static requestPermission() { return Promise.resolve('granted'); }
+                };
+            })()"#
+        );
+
+        let app_title = app_title_for_notifications.clone();
+        builder = builder.with_ipc_handler(move |req| {
+            let msg = req.body();
+            // Parse JSON to forward notifications
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(msg) {
+                if parsed.get("type").and_then(|t| t.as_str()) == Some("notification") {
+                    let title = parsed.get("title").and_then(|t| t.as_str()).unwrap_or("Notification");
+                    let body = parsed.get("body").and_then(|b| b.as_str()).unwrap_or("");
+                    let _ = notify_rust::Notification::new()
+                        .summary(&format!("{} — {}", app_title, title))
+                        .body(body)
+                        .appname("dev.heppen.webapps")
+                        .show();
+                }
+            }
+        });
+    }
 
     // Inject custom CSS if configured
     if let Some(ref css) = browser.custom_css {

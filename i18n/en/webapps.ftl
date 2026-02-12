@@ -125,3 +125,23 @@ custom-css-placeholder=body {"{"} background: #1a1a2e; {"}"}
 custom-js=Custom JavaScript
 custom-js-placeholder=console.log('Hello from custom script');
 custom-js-warning=Scripts run with full page access. Only use trusted code.
+
+# user agent
+user-agent=User Agent
+user-agent-default=Default
+user-agent-mobile=Mobile
+user-agent-custom=Custom
+user-agent-custom-label=Custom User Agent
+user-agent-custom-placeholder=Mozilla/5.0 ...
+
+# permissions
+permission-camera=Allow Camera
+permission-microphone=Allow Microphone
+permission-geolocation=Allow Location
+permission-notifications=Allow Notifications
+
+# data management
+clear-data=Clear Data
+toast-data-cleared=Website data cleared successfully
+toast-data-clear-error=Failed to clear website data
+profile-data-size=Profile Data Size

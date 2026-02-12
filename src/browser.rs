@@ -4,6 +4,24 @@ use std::path::PathBuf;
 /// Maximum length for a sanitized app ID.
 const MAX_APP_ID_LEN: usize = 128;
 
+/// User agent configuration for web apps.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub enum UserAgent {
+    #[default]
+    Default,
+    Mobile,
+    Custom(String),
+}
+
+/// Permission policy for web app capabilities.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct PermissionPolicy {
+    pub allow_camera: bool,
+    pub allow_microphone: bool,
+    pub allow_geolocation: bool,
+    pub allow_notifications: bool,
+}
+
 /// Sanitize an app ID for safe use in filesystem paths and desktop entry filenames.
 /// Removes path separators, traversal sequences, and enforces length limits.
 /// Returns an empty string if the input is empty after sanitization.
@@ -36,6 +54,8 @@ pub struct Browser {
     pub try_simulate_mobile: Option<bool>,
     pub custom_css: Option<String>,
     pub custom_js: Option<String>,
+    pub user_agent: Option<UserAgent>,
+    pub permissions: Option<PermissionPolicy>,
 }
 
 impl Browser {
@@ -54,6 +74,8 @@ impl Browser {
             try_simulate_mobile: None,
             custom_css: None,
             custom_js: None,
+            user_agent: None,
+            permissions: None,
         };
 
         if with_profile {

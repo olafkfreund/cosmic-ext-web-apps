@@ -512,3 +512,48 @@ impl IntoIterator for WebviewArgs {
         vec![self.id].into_iter()
     }
 }
+
+/// Calculate the total size of a web app's profile directory.
+/// Returns the size in bytes, or 0 if the profile doesn't exist.
+pub fn profile_size(app_id: &str) -> u64 {
+    let Some(path) = profiles_path(app_id) else {
+        return 0;
+    };
+    if !path.exists() {
+        return 0;
+    }
+    WalkDir::new(&path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// Format bytes as a human-readable string.
+pub fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// Clear all website data (cookies, cache, storage) for a web app by removing its profile directory.
+/// Returns Ok(()) on success, or an error if removal failed.
+pub fn clear_profile_data(app_id: &str) -> Result<(), std::io::Error> {
+    let Some(path) = profiles_path(app_id) else {
+        return Ok(());
+    };
+    if path.exists() {
+        std::fs::remove_dir_all(&path)?;
+        // Recreate empty profile dir so the app can still use persistent profile
+        std::fs::create_dir_all(&path)?;
+    }
+    Ok(())
+}

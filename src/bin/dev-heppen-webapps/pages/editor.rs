@@ -36,6 +36,13 @@ pub struct AppEditor {
     pub categories: Vec<String>,
     pub category_idx: Option<usize>,
     pub is_installed: bool,
+    pub app_user_agent: usize,
+    pub app_custom_ua: String,
+    pub user_agent_options: Vec<String>,
+    pub app_allow_camera: bool,
+    pub app_allow_microphone: bool,
+    pub app_allow_geolocation: bool,
+    pub app_allow_notifications: bool,
 }
 
 impl Default for AppEditor {
@@ -63,6 +70,13 @@ impl Default for AppEditor {
             categories,
             category_idx: Some(0),
             is_installed: false,
+            app_user_agent: 0,
+            app_custom_ua: String::new(),
+            user_agent_options: vec![fl!("user-agent-default"), fl!("user-agent-mobile"), fl!("user-agent-custom")],
+            app_allow_camera: false,
+            app_allow_microphone: false,
+            app_allow_geolocation: false,
+            app_allow_notifications: false,
         }
     }
 }
@@ -86,6 +100,13 @@ pub enum Message {
     AppSimulateMobile(bool),
     CustomCss(String),
     CustomJs(String),
+    UserAgentSelect(usize),
+    CustomUserAgent(String),
+    AllowCamera(bool),
+    AllowMicrophone(bool),
+    AllowGeolocation(bool),
+    AllowNotifications(bool),
+    ClearAppData,
 }
 
 impl AppEditor {
@@ -116,6 +137,22 @@ impl AppEditor {
             .iter()
             .position(|c| c == &launcher.category.name());
         editor.is_installed = true;
+
+        editor.app_user_agent = match &launcher.browser.user_agent {
+            Some(webapps::browser::UserAgent::Default) | None => 0,
+            Some(webapps::browser::UserAgent::Mobile) => 1,
+            Some(webapps::browser::UserAgent::Custom(_)) => 2,
+        };
+        editor.app_custom_ua = match &launcher.browser.user_agent {
+            Some(webapps::browser::UserAgent::Custom(ua)) => ua.clone(),
+            _ => String::new(),
+        };
+
+        let perms = launcher.browser.permissions.clone().unwrap_or_default();
+        editor.app_allow_camera = perms.allow_camera;
+        editor.app_allow_microphone = perms.allow_microphone;
+        editor.app_allow_geolocation = perms.allow_geolocation;
+        editor.app_allow_notifications = perms.allow_notifications;
 
         editor
     }
@@ -178,6 +215,20 @@ impl AppEditor {
                         duplicate.app_window_size = size.clone();
                     }
                     duplicate.app_persistent = browser.profile.is_some();
+                    duplicate.app_user_agent = match &browser.user_agent {
+                        Some(webapps::browser::UserAgent::Default) | None => 0,
+                        Some(webapps::browser::UserAgent::Mobile) => 1,
+                        Some(webapps::browser::UserAgent::Custom(_)) => 2,
+                    };
+                    duplicate.app_custom_ua = match &browser.user_agent {
+                        Some(webapps::browser::UserAgent::Custom(ua)) => ua.clone(),
+                        _ => String::new(),
+                    };
+                    let perms = browser.permissions.clone().unwrap_or_default();
+                    duplicate.app_allow_camera = perms.allow_camera;
+                    duplicate.app_allow_microphone = perms.allow_microphone;
+                    duplicate.app_allow_geolocation = perms.allow_geolocation;
+                    duplicate.app_allow_notifications = perms.allow_notifications;
                 }
                 return task::future(async move {
                     crate::pages::Message::DuplicateApp(Box::new(duplicate))
@@ -206,6 +257,17 @@ impl AppEditor {
                     if !self.app_custom_js.is_empty() {
                         browser.custom_js = Some(self.app_custom_js.clone());
                     }
+                    browser.user_agent = Some(match self.app_user_agent {
+                        1 => webapps::browser::UserAgent::Mobile,
+                        2 => webapps::browser::UserAgent::Custom(self.app_custom_ua.clone()),
+                        _ => webapps::browser::UserAgent::Default,
+                    });
+                    browser.permissions = Some(webapps::browser::PermissionPolicy {
+                        allow_camera: self.app_allow_camera,
+                        allow_microphone: self.app_allow_microphone,
+                        allow_geolocation: self.app_allow_geolocation,
+                        allow_notifications: self.app_allow_notifications,
+                    });
                     browser
                 };
 
@@ -264,6 +326,32 @@ impl AppEditor {
                 self.app_window_height = filter_numeric(height);
                 let parsed: f64 = self.app_window_height.parse().unwrap_or(webapps::DEFAULT_WINDOW_HEIGHT);
                 self.app_window_size.1 = parsed.clamp(200.0, 8192.0);
+            }
+            Message::UserAgentSelect(idx) => {
+                self.app_user_agent = idx;
+            }
+            Message::CustomUserAgent(ua) => {
+                self.app_custom_ua = ua;
+            }
+            Message::AllowCamera(v) => {
+                self.app_allow_camera = v;
+            }
+            Message::AllowMicrophone(v) => {
+                self.app_allow_microphone = v;
+            }
+            Message::AllowGeolocation(v) => {
+                self.app_allow_geolocation = v;
+            }
+            Message::AllowNotifications(v) => {
+                self.app_allow_notifications = v;
+            }
+            Message::ClearAppData => {
+                if let Some(browser) = &self.app_browser {
+                    let app_id = browser.app_id.as_ref().to_string();
+                    return task::future(async move {
+                        crate::pages::Message::ClearAppData(app_id)
+                    });
+                }
             }
         }
         Task::none()
@@ -380,8 +468,8 @@ impl AppEditor {
                         None
                     }
                 )
-                .push(
-                    widget::settings::section()
+                .push({
+                    let mut settings = widget::settings::section()
                         .add(widget::settings::item(
                             fl!("select-category"),
                             widget::dropdown(
@@ -429,6 +517,40 @@ impl AppEditor {
                                 .on_toggle(Message::AppSimulateMobile),
                         ))
                         .add(widget::settings::item(
+                            fl!("user-agent"),
+                            widget::dropdown(
+                                &self.user_agent_options,
+                                Some(self.app_user_agent),
+                                Message::UserAgentSelect,
+                            ),
+                        ));
+
+                    if self.app_user_agent == 2 {
+                        settings = settings.add(widget::settings::item(
+                            fl!("user-agent-custom-label"),
+                            widget::text_input(fl!("user-agent-custom-placeholder"), &self.app_custom_ua)
+                                .on_input(Message::CustomUserAgent),
+                        ));
+                    }
+
+                    settings = settings
+                        .add(widget::settings::item(
+                            fl!("permission-camera"),
+                            widget::toggler(self.app_allow_camera).on_toggle(Message::AllowCamera),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("permission-microphone"),
+                            widget::toggler(self.app_allow_microphone).on_toggle(Message::AllowMicrophone),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("permission-geolocation"),
+                            widget::toggler(self.app_allow_geolocation).on_toggle(Message::AllowGeolocation),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("permission-notifications"),
+                            widget::toggler(self.app_allow_notifications).on_toggle(Message::AllowNotifications),
+                        ))
+                        .add(widget::settings::item(
                             fl!("custom-css"),
                             widget::text_input(fl!("custom-css-placeholder"), &self.app_custom_css)
                                 .on_input(Message::CustomCss),
@@ -445,12 +567,22 @@ impl AppEditor {
                                     widget::text::caption(fl!("custom-js-warning"))
                                         .class(style::Text::Accent)
                                 ),
-                        )),
-                )
+                        ));
+
+                    settings
+                })
                 .push(
                     widget::row()
                         .spacing(8)
                         .push(widget::horizontal_space())
+                        .push_maybe(if self.is_installed && self.app_persistent {
+                            Some(
+                                widget::button::destructive(fl!("clear-data"))
+                                    .on_press(Message::ClearAppData),
+                            )
+                        } else {
+                            None
+                        })
                         .push_maybe(if !self.is_installed {
                             None
                         } else {

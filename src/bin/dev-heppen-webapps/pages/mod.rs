@@ -80,6 +80,8 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     UpdateConfig(AppConfig),
     UpdateTheme(Box<Theme>),
+    ClearAppData(String),
+    ClearAppDataDone(Result<(), String>),
     // empty message
     None,
 }
@@ -763,6 +765,32 @@ impl Application for QuickWebApps {
 
                 if std::env::var("XDG_CURRENT_DESKTOP") != Ok("COSMIC".to_string()) {
                     tasks.push(theme_selector);
+                }
+            }
+            Message::ClearAppData(app_id) => {
+                return task::future(async move {
+                    match tokio::task::spawn_blocking(move || {
+                        webapps::clear_profile_data(&app_id)
+                    }).await {
+                        Ok(Ok(())) => cosmic::action::app(Message::ClearAppDataDone(Ok(()))),
+                        Ok(Err(e)) => cosmic::action::app(Message::ClearAppDataDone(Err(e.to_string()))),
+                        Err(e) => cosmic::action::app(Message::ClearAppDataDone(Err(e.to_string()))),
+                    }
+                });
+            }
+            Message::ClearAppDataDone(result) => {
+                match result {
+                    Ok(()) => {
+                        tasks.push(self.toasts.push(
+                            widget::toaster::Toast::new(fl!("toast-data-cleared")),
+                        ).map(cosmic::Action::App));
+                    }
+                    Err(msg) => {
+                        tracing::error!("Failed to clear app data: {msg}");
+                        tasks.push(self.toasts.push(
+                            widget::toaster::Toast::new(fl!("toast-data-clear-error")),
+                        ).map(cosmic::Action::App));
+                    }
                 }
             }
             Message::None => (),
