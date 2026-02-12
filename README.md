@@ -88,14 +88,14 @@ This project includes a Nix flake for reproducible builds using [crane](https://
 #### Quick run (no installation)
 
 ```bash
-nix run github:olafkfreund/cosmic-web-apps
+nix run github:olafkfreund/cosmic-ext-web-apps
 ```
 
 #### Build from source
 
 ```bash
-git clone https://github.com/olafkfreund/cosmic-web-apps.git
-cd cosmic-web-apps
+git clone https://github.com/olafkfreund/cosmic-ext-web-apps.git
+cd cosmic-ext-web-apps
 nix build
 ./result/bin/dev.heppen.webapps
 ```
@@ -117,20 +117,20 @@ Add the flake input to your `flake.nix`:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    cosmic-web-apps = {
-      url = "github:olafkfreund/cosmic-web-apps";
+    cosmic-ext-web-apps = {
+      url = "github:olafkfreund/cosmic-ext-web-apps";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, cosmic-web-apps, ... }: {
+  outputs = { self, nixpkgs, cosmic-ext-web-apps, ... }: {
     nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         ./configuration.nix
         {
           environment.systemPackages = [
-            cosmic-web-apps.packages.x86_64-linux.default
+            cosmic-ext-web-apps.packages.x86_64-linux.default
           ];
         }
       ];
@@ -157,13 +157,13 @@ Add the flake input and use it in your Home Manager configuration (loaded as a N
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    cosmic-web-apps = {
-      url = "github:olafkfreund/cosmic-web-apps";
+    cosmic-ext-web-apps = {
+      url = "github:olafkfreund/cosmic-ext-web-apps";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, home-manager, cosmic-web-apps, ... }: {
+  outputs = { self, nixpkgs, home-manager, cosmic-ext-web-apps, ... }: {
     nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
@@ -172,7 +172,7 @@ Add the flake input and use it in your Home Manager configuration (loaded as a N
         {
           home-manager.users.yourusername = {
             home.packages = [
-              cosmic-web-apps.packages.x86_64-linux.default
+              cosmic-ext-web-apps.packages.x86_64-linux.default
             ];
           };
         }

@@ -51,7 +51,7 @@
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        cosmic-web-apps = craneLib.buildPackage (commonArgs // {
+        cosmic-ext-web-apps = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
 
           nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.just ];
@@ -86,8 +86,8 @@
       in
       {
         packages = {
-          inherit cosmic-web-apps;
-          default = cosmic-web-apps;
+          inherit cosmic-ext-web-apps;
+          default = cosmic-ext-web-apps;
         };
 
         devShells.default = craneLib.devShell {
@@ -99,14 +99,14 @@
             pkgs.just
           ];
 
-          inputsFrom = [ cosmic-web-apps ];
+          inputsFrom = [ cosmic-ext-web-apps ];
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
         };
 
         apps.default = {
           type = "app";
-          program = "${cosmic-web-apps}/bin/dev.heppen.webapps";
+          program = "${cosmic-ext-web-apps}/bin/dev.heppen.webapps";
         };
 
         checks = {
