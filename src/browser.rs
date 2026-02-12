@@ -34,6 +34,8 @@ pub struct Browser {
     pub window_decorations: Option<bool>,
     pub private_mode: Option<bool>,
     pub try_simulate_mobile: Option<bool>,
+    pub custom_css: Option<String>,
+    pub custom_js: Option<String>,
 }
 
 impl Browser {
@@ -50,6 +52,8 @@ impl Browser {
             window_decorations: None,
             private_mode: None,
             try_simulate_mobile: None,
+            custom_css: None,
+            custom_js: None,
         };
 
         if with_profile {

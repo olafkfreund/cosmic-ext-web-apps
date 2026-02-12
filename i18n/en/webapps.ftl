@@ -118,3 +118,10 @@ file-filter-svg=SVG Images
 toast-app-saved=Web app saved successfully
 toast-app-deleted=Web app deleted
 toast-save-error=Failed to save web app
+
+# custom CSS/JS injection
+custom-css=Custom CSS
+custom-css-placeholder=body {"{"} background: #1a1a2e; {"}"}
+custom-js=Custom JavaScript
+custom-js-placeholder=console.log('Hello from custom script');
+custom-js-warning=Scripts run with full page access. Only use trusted code.

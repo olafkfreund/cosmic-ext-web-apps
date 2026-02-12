@@ -110,6 +110,23 @@ fn main() -> wry::Result<()> {
         builder = builder.with_user_agent(webapps::MOBILE_UA);
     };
 
+    // Inject custom CSS if configured
+    if let Some(ref css) = browser.custom_css {
+        if !css.trim().is_empty() {
+            let css_escaped = css.replace('\\', "\\\\").replace('`', "\\`");
+            builder = builder.with_initialization_script(&format!(
+                "(function(){{var s=document.createElement('style');s.textContent=`{css_escaped}`;document.head.appendChild(s)}})()"
+            ));
+        }
+    }
+
+    // Inject custom JavaScript if configured
+    if let Some(ref js) = browser.custom_js {
+        if !js.trim().is_empty() {
+            builder = builder.with_initialization_script(js);
+        }
+    }
+
     let _webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;

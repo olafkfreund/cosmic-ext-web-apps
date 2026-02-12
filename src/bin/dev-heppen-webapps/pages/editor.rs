@@ -30,6 +30,8 @@ pub struct AppEditor {
     pub app_window_decorations: bool,
     pub app_private_mode: bool,
     pub app_simulate_mobile: bool,
+    pub app_custom_css: String,
+    pub app_custom_js: String,
     pub selected_icon: Option<webapps::Icon>,
     pub categories: Vec<String>,
     pub category_idx: Option<usize>,
@@ -55,6 +57,8 @@ impl Default for AppEditor {
             app_window_decorations: true,
             app_private_mode: false,
             app_simulate_mobile: false,
+            app_custom_css: String::new(),
+            app_custom_js: String::new(),
             selected_icon: None,
             categories,
             category_idx: Some(0),
@@ -80,6 +84,8 @@ pub enum Message {
     WindowDecorations(bool),
     AppIncognito(bool),
     AppSimulateMobile(bool),
+    CustomCss(String),
+    CustomJs(String),
 }
 
 impl AppEditor {
@@ -103,6 +109,8 @@ impl AppEditor {
         editor.app_window_decorations = window_decorations;
         editor.app_private_mode = incognito;
         editor.app_simulate_mobile = simulate_mobile;
+        editor.app_custom_css = launcher.browser.custom_css.clone().unwrap_or_default();
+        editor.app_custom_js = launcher.browser.custom_js.clone().unwrap_or_default();
         editor.category_idx = editor
             .categories
             .iter()
@@ -119,6 +127,12 @@ impl AppEditor {
             }
             Message::AppSimulateMobile(flag) => {
                 self.app_simulate_mobile = flag;
+            }
+            Message::CustomCss(css) => {
+                self.app_custom_css = css;
+            }
+            Message::CustomJs(js) => {
+                self.app_custom_js = js;
             }
             Message::Category(idx) => {
                 self.app_category = webapps::Category::from_index(idx as u8);
@@ -156,6 +170,8 @@ impl AppEditor {
                     duplicate.app_window_decorations = browser.window_decorations.unwrap_or(true);
                     duplicate.app_private_mode = browser.private_mode.unwrap_or(false);
                     duplicate.app_simulate_mobile = browser.try_simulate_mobile.unwrap_or(false);
+                    duplicate.app_custom_css = browser.custom_css.clone().unwrap_or_default();
+                    duplicate.app_custom_js = browser.custom_js.clone().unwrap_or_default();
                     if let Some(ref size) = browser.window_size {
                         duplicate.app_window_width = size.0.to_string();
                         duplicate.app_window_height = size.1.to_string();
@@ -184,6 +200,12 @@ impl AppEditor {
                     browser.window_decorations = Some(self.app_window_decorations);
                     browser.private_mode = Some(self.app_private_mode);
                     browser.try_simulate_mobile = Some(self.app_simulate_mobile);
+                    if !self.app_custom_css.is_empty() {
+                        browser.custom_css = Some(self.app_custom_css.clone());
+                    }
+                    if !self.app_custom_js.is_empty() {
+                        browser.custom_js = Some(self.app_custom_js.clone());
+                    }
                     browser
                 };
 
@@ -405,6 +427,24 @@ impl AppEditor {
                             fl!("simulate-mobile"),
                             widget::toggler(self.app_simulate_mobile)
                                 .on_toggle(Message::AppSimulateMobile),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("custom-css"),
+                            widget::text_input(fl!("custom-css-placeholder"), &self.app_custom_css)
+                                .on_input(Message::CustomCss),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("custom-js"),
+                            widget::column()
+                                .spacing(4)
+                                .push(
+                                    widget::text_input(fl!("custom-js-placeholder"), &self.app_custom_js)
+                                        .on_input(Message::CustomJs),
+                                )
+                                .push(
+                                    widget::text::caption(fl!("custom-js-warning"))
+                                        .class(style::Text::Accent)
+                                ),
                         )),
                 )
                 .push(
