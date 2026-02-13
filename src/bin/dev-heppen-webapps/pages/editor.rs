@@ -50,6 +50,23 @@ pub struct AppEditor {
     pub show_advanced: bool,
     pub thumbnail_handle: Option<widget::image::Handle>,
     pub thumbnail_loading: bool,
+    // #53, #60, #61: Privacy features
+    pub app_content_blocking: bool,
+    pub app_block_cookies: bool,
+    pub app_block_webrtc: bool,
+    // #54: Proxy
+    pub app_proxy_url: String,
+    // #55: Zoom
+    pub app_zoom_level: String,
+    // #56: Session restore
+    pub app_restore_session: bool,
+    // #57: Usage statistics (read-only display)
+    pub app_launch_count: u64,
+    pub app_last_launched: Option<u64>,
+    // #59: Minimize to background
+    pub app_minimize_to_background: bool,
+    // #62: Auto dark mode
+    pub app_auto_dark_mode: bool,
 }
 
 impl Default for AppEditor {
@@ -92,6 +109,16 @@ impl Default for AppEditor {
             show_advanced: false,
             thumbnail_handle: None,
             thumbnail_loading: false,
+            app_content_blocking: false,
+            app_block_cookies: false,
+            app_block_webrtc: false,
+            app_proxy_url: String::new(),
+            app_zoom_level: String::from("1.0"),
+            app_restore_session: false,
+            app_launch_count: 0,
+            app_last_launched: None,
+            app_minimize_to_background: false,
+            app_auto_dark_mode: false,
         }
     }
 }
@@ -128,6 +155,14 @@ pub enum Message {
     FetchThumbnail,
     ThumbnailResult(Option<String>),
     ThumbnailLoaded(Option<widget::image::Handle>),
+    ContentBlocking(bool),
+    BlockThirdPartyCookies(bool),
+    BlockWebRTC(bool),
+    ProxyUrl(String),
+    ZoomLevel(String),
+    RestoreSession(bool),
+    MinimizeToBackground(bool),
+    AutoDarkMode(bool),
 }
 
 impl AppEditor {
@@ -179,6 +214,17 @@ impl AppEditor {
             .as_ref()
             .map(|schemes| schemes.join(", "))
             .unwrap_or_default();
+
+        editor.app_content_blocking = launcher.browser.content_blocking.unwrap_or(false);
+        editor.app_block_cookies = launcher.browser.block_third_party_cookies.unwrap_or(false);
+        editor.app_block_webrtc = launcher.browser.block_webrtc.unwrap_or(false);
+        editor.app_proxy_url = launcher.browser.proxy_url.clone().unwrap_or_default();
+        editor.app_zoom_level = launcher.browser.zoom_level.unwrap_or(1.0).to_string();
+        editor.app_restore_session = launcher.browser.restore_session.unwrap_or(false);
+        editor.app_launch_count = launcher.browser.launch_count.unwrap_or(0);
+        editor.app_last_launched = launcher.browser.last_launched;
+        editor.app_minimize_to_background = launcher.browser.minimize_to_background.unwrap_or(false);
+        editor.app_auto_dark_mode = launcher.browser.auto_dark_mode.unwrap_or(false);
 
         editor
     }
@@ -273,6 +319,14 @@ impl AppEditor {
                         .as_ref()
                         .map(|schemes| schemes.join(", "))
                         .unwrap_or_default();
+                    duplicate.app_content_blocking = browser.content_blocking.unwrap_or(false);
+                    duplicate.app_block_cookies = browser.block_third_party_cookies.unwrap_or(false);
+                    duplicate.app_block_webrtc = browser.block_webrtc.unwrap_or(false);
+                    duplicate.app_proxy_url = browser.proxy_url.clone().unwrap_or_default();
+                    duplicate.app_zoom_level = browser.zoom_level.unwrap_or(1.0).to_string();
+                    duplicate.app_restore_session = browser.restore_session.unwrap_or(false);
+                    duplicate.app_minimize_to_background = browser.minimize_to_background.unwrap_or(false);
+                    duplicate.app_auto_dark_mode = browser.auto_dark_mode.unwrap_or(false);
                 }
                 return task::future(async move {
                     crate::pages::Message::DuplicateApp(Box::new(duplicate))
@@ -321,6 +375,17 @@ impl AppEditor {
                     if !schemes.is_empty() {
                         browser.url_schemes = Some(schemes);
                     }
+                    browser.content_blocking = Some(self.app_content_blocking);
+                    browser.block_third_party_cookies = Some(self.app_block_cookies);
+                    browser.block_webrtc = Some(self.app_block_webrtc);
+                    if !self.app_proxy_url.is_empty() {
+                        browser.proxy_url = Some(self.app_proxy_url.clone());
+                    }
+                    let zoom: f64 = self.app_zoom_level.parse().unwrap_or(1.0);
+                    browser.zoom_level = Some(zoom.clamp(0.25, 5.0));
+                    browser.restore_session = Some(self.app_restore_session);
+                    browser.minimize_to_background = Some(self.app_minimize_to_background);
+                    browser.auto_dark_mode = Some(self.app_auto_dark_mode);
                     browser
                 };
 
@@ -414,6 +479,30 @@ impl AppEditor {
             }
             Message::UrlSchemes(schemes) => {
                 self.app_url_schemes = schemes;
+            }
+            Message::ContentBlocking(flag) => {
+                self.app_content_blocking = flag;
+            }
+            Message::BlockThirdPartyCookies(flag) => {
+                self.app_block_cookies = flag;
+            }
+            Message::BlockWebRTC(flag) => {
+                self.app_block_webrtc = flag;
+            }
+            Message::ProxyUrl(url) => {
+                self.app_proxy_url = url;
+            }
+            Message::ZoomLevel(level) => {
+                self.app_zoom_level = filter_numeric(level);
+            }
+            Message::RestoreSession(flag) => {
+                self.app_restore_session = flag;
+            }
+            Message::MinimizeToBackground(flag) => {
+                self.app_minimize_to_background = flag;
+            }
+            Message::AutoDarkMode(flag) => {
+                self.app_auto_dark_mode = flag;
             }
             Message::ToggleAdvanced(flag) => {
                 self.show_advanced = flag;
@@ -739,7 +828,70 @@ impl AppEditor {
                                 &self.app_url_schemes,
                             )
                             .on_input(Message::UrlSchemes),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("content-blocking"),
+                            widget::toggler(self.app_content_blocking)
+                                .on_toggle(Message::ContentBlocking),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("block-third-party-cookies"),
+                            widget::toggler(self.app_block_cookies)
+                                .on_toggle(Message::BlockThirdPartyCookies),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("block-webrtc"),
+                            widget::toggler(self.app_block_webrtc)
+                                .on_toggle(Message::BlockWebRTC),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("proxy-url"),
+                            widget::text_input(
+                                fl!("proxy-url-placeholder"),
+                                &self.app_proxy_url,
+                            )
+                            .on_input(Message::ProxyUrl),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("zoom-level"),
+                            widget::text_input(
+                                fl!("zoom-level-placeholder"),
+                                &self.app_zoom_level,
+                            )
+                            .on_input(Message::ZoomLevel),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("restore-session"),
+                            widget::toggler(self.app_restore_session)
+                                .on_toggle(Message::RestoreSession),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("minimize-to-background"),
+                            widget::toggler(self.app_minimize_to_background)
+                                .on_toggle(Message::MinimizeToBackground),
+                        ))
+                        .add(widget::settings::item(
+                            fl!("auto-dark-mode"),
+                            widget::toggler(self.app_auto_dark_mode)
+                                .on_toggle(Message::AutoDarkMode),
                         ));
+
+                    // Show usage stats for installed apps (read-only)
+                    if self.is_installed {
+                        advanced = advanced
+                            .add(widget::settings::item(
+                                fl!("launch-count"),
+                                widget::text::body(format!("{}", self.app_launch_count)),
+                            ))
+                            .add(widget::settings::item(
+                                fl!("last-launched"),
+                                widget::text::body(
+                                    self.app_last_launched
+                                        .map(webapps::format_timestamp)
+                                        .unwrap_or_else(|| fl!("never-launched")),
+                                ),
+                            ));
+                    }
 
                     Some(advanced)
                 } else {

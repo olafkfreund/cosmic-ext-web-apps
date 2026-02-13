@@ -763,6 +763,27 @@ pub fn running_webview_app_ids() -> HashSet<String> {
     ids
 }
 
+/// Format a Unix timestamp as a human-readable date/time string.
+pub fn format_timestamp(ts: u64) -> String {
+    use std::time::{Duration, UNIX_EPOCH};
+    let dt = UNIX_EPOCH + Duration::from_secs(ts);
+    match dt.elapsed() {
+        Ok(elapsed) => {
+            let secs = elapsed.as_secs();
+            if secs < 60 {
+                "just now".to_string()
+            } else if secs < 3600 {
+                format!("{}m ago", secs / 60)
+            } else if secs < 86400 {
+                format!("{}h ago", secs / 3600)
+            } else {
+                format!("{}d ago", secs / 86400)
+            }
+        }
+        Err(_) => "unknown".to_string(),
+    }
+}
+
 /// Clear all website data (cookies, cache, storage) for a web app by removing its profile directory.
 /// Returns Ok(()) on success, or an error if removal failed.
 pub fn clear_profile_data(app_id: &str) -> Result<(), std::io::Error> {

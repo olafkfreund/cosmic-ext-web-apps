@@ -57,6 +57,26 @@ pub struct Browser {
     pub user_agent: Option<UserAgent>,
     pub permissions: Option<PermissionPolicy>,
     pub url_schemes: Option<Vec<String>>,
+    // #53: Content blocking (ads/trackers)
+    pub content_blocking: Option<bool>,
+    // #60: Block third-party cookies
+    pub block_third_party_cookies: Option<bool>,
+    // #61: Block WebRTC IP leak
+    pub block_webrtc: Option<bool>,
+    // #54: HTTP/HTTPS proxy
+    pub proxy_url: Option<String>,
+    // #55: Page zoom level
+    pub zoom_level: Option<f64>,
+    // #56: Session restore
+    pub restore_session: Option<bool>,
+    pub last_url: Option<String>,
+    // #57: Usage statistics
+    pub launch_count: Option<u64>,
+    pub last_launched: Option<u64>,
+    // #59: Minimize to background on close
+    pub minimize_to_background: Option<bool>,
+    // #62: Auto dark mode
+    pub auto_dark_mode: Option<bool>,
 }
 
 impl Browser {
@@ -79,6 +99,17 @@ impl Browser {
             user_agent: None,
             permissions: None,
             url_schemes: None,
+            content_blocking: None,
+            block_third_party_cookies: None,
+            block_webrtc: None,
+            proxy_url: None,
+            zoom_level: None,
+            restore_session: None,
+            last_url: None,
+            launch_count: None,
+            last_launched: None,
+            minimize_to_background: None,
+            auto_dark_mode: None,
         };
 
         if with_profile {

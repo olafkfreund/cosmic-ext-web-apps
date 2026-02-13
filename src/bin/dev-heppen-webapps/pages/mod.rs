@@ -92,6 +92,12 @@ pub enum Message {
     ToggleViewMode,
     SelectAppFromGrid(String),
     UpdateRunningApps(std::collections::HashSet<String>),
+    ToggleBulkMode,
+    ToggleBulkSelect(String),
+    BulkDelete,
+    BulkDeleteDone(usize),
+    BulkExport,
+    BulkExportResult(Result<(), String>),
     // empty message
     None,
 }
@@ -125,6 +131,8 @@ pub struct QuickWebApps {
     theme_idx: Option<usize>,
     toasts: widget::toaster::Toasts<Message>,
     running_app_ids: std::collections::HashSet<String>,
+    bulk_mode: bool,
+    selected_app_ids: std::collections::HashSet<String>,
 }
 
 impl Application for QuickWebApps {
@@ -217,6 +225,8 @@ impl Application for QuickWebApps {
             theme_idx: Some(0),
             toasts: widget::toaster::Toasts::new(Message::CloseToast),
             running_app_ids: std::collections::HashSet::new(),
+            bulk_mode: false,
+            selected_app_ids: std::collections::HashSet::new(),
         };
 
         let tasks = vec![
@@ -621,6 +631,25 @@ impl Application for QuickWebApps {
                 });
             }
             Message::Launch(args) => {
+                // #57: Update usage statistics
+                let app_id_str = args.as_ref().to_string();
+                let safe_id = webapps::browser::sanitize_app_id(&app_id_str);
+                if let Some(db_path) = webapps::database_path(&format!("{safe_id}.ron")) {
+                    if let Ok(content) = std::fs::read_to_string(&db_path) {
+                        if let Ok(mut launcher) = ron::from_str::<webapps::launcher::WebAppLauncher>(&content) {
+                            let count = launcher.browser.launch_count.unwrap_or(0);
+                            launcher.browser.launch_count = Some(count + 1);
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            launcher.browser.last_launched = Some(now);
+                            if let Ok(serialized) = to_string_pretty(&launcher, ron::ser::PrettyConfig::default()) {
+                                let _ = std::fs::write(&db_path, serialized);
+                            }
+                        }
+                    }
+                }
                 return Task::perform(
                     async move {
                         if let Err(e) = Command::new("dev.heppen.webapps.webview")
@@ -950,6 +979,129 @@ impl Application for QuickWebApps {
                     }
                 }
             }
+            Message::ToggleBulkMode => {
+                self.bulk_mode = !self.bulk_mode;
+                if !self.bulk_mode {
+                    self.selected_app_ids.clear();
+                }
+            }
+            Message::ToggleBulkSelect(app_id) => {
+                if self.selected_app_ids.contains(&app_id) {
+                    self.selected_app_ids.remove(&app_id);
+                } else {
+                    self.selected_app_ids.insert(app_id);
+                }
+            }
+            Message::BulkDelete => {
+                let ids_to_delete: Vec<String> = self.selected_app_ids.iter().cloned().collect();
+                let apps_to_delete: Vec<webapps::launcher::WebAppLauncher> = self
+                    .cached_apps
+                    .iter()
+                    .filter(|app| ids_to_delete.contains(&app.browser.app_id.as_ref().to_string()))
+                    .cloned()
+                    .collect();
+
+                let count = apps_to_delete.len();
+                return task::future(async move {
+                    for launcher in apps_to_delete {
+                        if let Err(e) = launcher.delete().await {
+                            tracing::error!("Failed to delete web app {}: {e}", launcher.name);
+                        }
+                    }
+                    cosmic::action::app(Message::BulkDeleteDone(count))
+                });
+            }
+            Message::BulkDeleteDone(count) => {
+                self.bulk_mode = false;
+                self.selected_app_ids.clear();
+                tasks.push(
+                    self.toasts
+                        .push(widget::toaster::Toast::new(fl!("toast-bulk-deleted")))
+                        .map(cosmic::Action::App),
+                );
+                tasks.push(task::message(cosmic::action::app(Message::ReloadNavbarItems)));
+                tracing::info!("Bulk deleted {count} apps");
+            }
+            Message::BulkExport => {
+                let ids_to_export: Vec<String> = self.selected_app_ids.iter().cloned().collect();
+                let apps_to_export: Vec<webapps::launcher::WebAppLauncher> = self
+                    .cached_apps
+                    .iter()
+                    .filter(|app| ids_to_export.contains(&app.browser.app_id.as_ref().to_string()))
+                    .cloned()
+                    .collect();
+
+                return task::future(async move {
+                    let title = fl!("file-dialog-export-title");
+                    let label = fl!("file-dialog-save");
+                    let response = match SelectedFiles::save_file()
+                        .title(title.as_str())
+                        .accept_label(label.as_str())
+                        .modal(true)
+                        .current_name("webapps-selected-export.ron")
+                        .send()
+                        .await
+                    {
+                        Ok(r) => r.response(),
+                        Err(e) => {
+                            tracing::error!("Failed to open save dialog: {e}");
+                            return cosmic::action::app(Message::BulkExportResult(Err(
+                                fl!("toast-export-error"),
+                            )));
+                        }
+                    };
+
+                    if let Ok(result) = response {
+                        let uris = result.uris();
+                        if let Some(uri) = uris.first() {
+                            let path = std::path::PathBuf::from(uri.path());
+                            let pretty = ron::ser::PrettyConfig::default();
+                            match ron::ser::to_string_pretty(&apps_to_export, pretty) {
+                                Ok(content) => match std::fs::write(&path, content) {
+                                    Ok(()) => {
+                                        return cosmic::action::app(Message::BulkExportResult(
+                                            Ok(()),
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Bulk export write failed: {e}");
+                                        return cosmic::action::app(Message::BulkExportResult(
+                                            Err(fl!("toast-export-error")),
+                                        ));
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::error!("Bulk export serialize failed: {e}");
+                                    return cosmic::action::app(Message::BulkExportResult(Err(
+                                        fl!("toast-export-error"),
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                    cosmic::action::none()
+                });
+            }
+            Message::BulkExportResult(result) => {
+                self.bulk_mode = false;
+                self.selected_app_ids.clear();
+                match result {
+                    Ok(()) => {
+                        tasks.push(
+                            self.toasts
+                                .push(widget::toaster::Toast::new(fl!("toast-bulk-exported")))
+                                .map(cosmic::Action::App),
+                        );
+                    }
+                    Err(msg) => {
+                        tasks.push(
+                            self.toasts
+                                .push(widget::toaster::Toast::new(msg))
+                                .map(cosmic::Action::App),
+                        );
+                    }
+                }
+            }
             Message::None => (),
         };
 
@@ -994,6 +1146,13 @@ impl Application for QuickWebApps {
                 widget::text(fl!("toggle-view")),
                 widget::tooltip::Position::Bottom,
             )
+            .into(),
+            widget::button::standard(if self.bulk_mode {
+                fl!("bulk-done")
+            } else {
+                fl!("bulk-select")
+            })
+            .on_press(Message::ToggleBulkMode)
             .into(),
         ]
     }
@@ -1098,6 +1257,17 @@ impl Application for QuickWebApps {
                         };
 
                         let app_id = app.browser.app_id.as_ref().to_string();
+                        let is_selected = self.selected_app_ids.contains(&app_id);
+                        let btn_class = if self.bulk_mode && is_selected {
+                            cosmic::style::Button::Suggested
+                        } else {
+                            cosmic::style::Button::Image
+                        };
+                        let press_msg = if self.bulk_mode {
+                            Message::ToggleBulkSelect(app_id)
+                        } else {
+                            Message::SelectAppFromGrid(app_id)
+                        };
                         widget::button::custom(
                             widget::column()
                                 .spacing(8)
@@ -1114,8 +1284,8 @@ impl Application for QuickWebApps {
                         )
                         .width(Length::Fixed(120.0))
                         .height(Length::Fixed(120.0))
-                        .on_press(Message::SelectAppFromGrid(app_id))
-                        .class(cosmic::style::Button::Image)
+                        .on_press(press_msg)
+                        .class(btn_class)
                         .into()
                     })
                     .collect();
@@ -1124,15 +1294,38 @@ impl Application for QuickWebApps {
                     .spacing(12)
                     .wrap();
 
-                widget::container(
+                let mut grid_col = widget::column().spacing(12);
+
+                // Bulk action toolbar
+                if self.bulk_mode && !self.selected_app_ids.is_empty() {
+                    grid_col = grid_col.push(
+                        widget::container(
+                            widget::row()
+                                .spacing(8)
+                                .push(
+                                    widget::button::destructive(fl!("bulk-delete"))
+                                        .on_press(Message::BulkDelete),
+                                )
+                                .push(
+                                    widget::button::standard(fl!("bulk-export"))
+                                        .on_press(Message::BulkExport),
+                                ),
+                        )
+                        .padding([0, 24]),
+                    );
+                }
+
+                grid_col = grid_col.push(
                     widget::container(cards)
                         .padding(24)
                         .width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(Horizontal::Center)
-                .center_x(Length::Fill)
+                );
+
+                widget::container(grid_col)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(Horizontal::Center)
+                    .center_x(Length::Fill)
             }
             _ => {
                 // List/editor view (default)
