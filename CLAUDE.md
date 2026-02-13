@@ -26,7 +26,7 @@ Flatpak build (primary distribution method):
 flatpak run --command=flathub-build org.flatpak.Builder --install dev.heppen.webapps.json
 ```
 
-There is no test suite. There is no flake.nix — use the Containerfile in `.devcontainer/` or system-installed deps.
+There is no test suite. A `flake.nix` is provided for reproducible Nix builds (`nix build`), development shells (`nix develop`), and CI checks (`nix flake check`). Alternatively, use the Containerfile in `.devcontainer/` or system-installed deps.
 
 ### System Dependencies
 
