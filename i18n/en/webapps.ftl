@@ -165,3 +165,36 @@ toggle-view=Toggle View
 
 # thumbnails (#48)
 fetch-thumbnail=Load Preview
+
+# privacy features (#53, #60, #61)
+content-blocking=Block Ads & Trackers
+block-third-party-cookies=Block Third-Party Cookies
+block-webrtc=Block WebRTC IP Leak
+
+# proxy (#54)
+proxy-url=Proxy URL
+proxy-url-placeholder=http://proxy.example.com:8080
+
+# zoom & session (#55, #56)
+zoom-level=Zoom Level
+zoom-level-placeholder=1.0
+restore-session=Restore Last Session
+
+# usage statistics (#57)
+launch-count=Launch Count
+last-launched=Last Launched
+never-launched=Never
+
+# minimize to background (#59)
+minimize-to-background=Minimize to Background on Close
+
+# auto dark mode (#62)
+auto-dark-mode=Auto Dark Mode
+
+# bulk operations (#58)
+bulk-select=Select
+bulk-done=Done
+bulk-delete=Delete Selected
+bulk-export=Export Selected
+toast-bulk-deleted=Selected apps deleted
+toast-bulk-exported=Selected apps exported
